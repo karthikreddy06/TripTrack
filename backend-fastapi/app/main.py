@@ -37,10 +37,30 @@ app.include_router(users_router, prefix="/api")
 app.include_router(trips_router, prefix="/api")
 
 
-@app.get("/api", tags=["General"], include_in_schema=False)
+@app.get("/api", tags=["General"])
+def api_home():
+    """API root endpoint verifying service availability."""
+    return {
+        "message": "Welcome to TravelTrack API",
+        "status": "running"
+    }
+
+
 @app.get("/", tags=["General"])
 def home():
-    """Root endpoint verifying API availability."""
+    """
+    Root endpoint. Serves React index.html if frontend is built,
+    or API welcome status otherwise.
+    """
+    from pathlib import Path
+    root_dist = Path(__file__).resolve().parent.parent.parent / "dist" / "index.html"
+    frontend_dist = Path(__file__).resolve().parent.parent.parent / "frontend-react" / "dist" / "index.html"
+
+    target = root_dist if root_dist.exists() else frontend_dist
+    if target.exists():
+        from fastapi.responses import FileResponse
+        return FileResponse(str(target))
+
     return {
         "message": "Welcome to TravelTrack API",
         "status": "running"

@@ -104,9 +104,10 @@ In the Vercel project setup screen, add the following under **Environment Variab
 
 > [!NOTE]
 > `VITE_API_URL` is **not required** in production. The React frontend automatically routes requests to the same-origin `/api` path.
+> The root `vercel.json` configures the static build output to `dist` and routes all API calls to `api/index.py`.
 
 ### 3. Deploy
-Click **Deploy**. Vercel will automatically build the React frontend into static assets and deploy the FastAPI backend to Serverless Functions under `/api/*`.
+Click **Deploy**. Vercel will run `npm run build`, output the frontend assets into `dist/`, and deploy the FastAPI backend as serverless functions under `/api/*`. Client routes (e.g. `/dashboard`, `/login`) are automatically rewritten to `/index.html` with resilient SPA fallbacks.
 
 ---
 
