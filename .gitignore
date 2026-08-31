@@ -1,0 +1,69 @@
+# ==================================================
+# Environment Variables & Secrets
+# ==================================================
+.env
+.env.*
+!.env.example
+
+**/.env
+**/.env.*
+!**/.env.example
+
+# Local configuration overrides
+*.local
+
+# ==================================================
+# Python & Virtual Environments
+# ==================================================
+__pycache__/
+*.py[cod]
+*$py.class
+
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+coverage/
+htmlcov/
+
+# Packaging
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# ==================================================
+# Node.js & React Frontend
+# ==================================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Vite build output
+dist/
+dist-ssr/
+*.local
+
+# ==================================================
+# IDEs & System Files
+# ==================================================
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
