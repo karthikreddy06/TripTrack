@@ -1,18 +1,20 @@
 import os
 from datetime import datetime, timedelta, timezone
 
-from dotenv import load_dotenv
+from pathlib import Path
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 
-from pathlib import Path
-
-# Load environment variables
-load_dotenv()
-backend_env = Path(__file__).resolve().parent.parent / ".env"
-if backend_env.exists():
-    load_dotenv(backend_env)
+# Load environment variables from local .env if available
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+    backend_env = Path(__file__).resolve().parent.parent / ".env"
+    if backend_env.exists():
+        load_dotenv(backend_env)
+except ImportError:
+    pass
 
 SECRET_KEY = os.getenv("JWT_SECRET_KEY")
 ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")

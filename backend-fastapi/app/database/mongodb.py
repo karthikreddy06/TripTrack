@@ -1,14 +1,16 @@
 import os
-from dotenv import load_dotenv
+from pathlib import Path
 from pymongo import MongoClient
 
-from pathlib import Path
-
-# Load environment variables from .env file
-load_dotenv()
-backend_env = Path(__file__).resolve().parent.parent.parent / ".env"
-if backend_env.exists():
-    load_dotenv(backend_env)
+# Load environment variables from local .env file if available
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+    backend_env = Path(__file__).resolve().parent.parent.parent / ".env"
+    if backend_env.exists():
+        load_dotenv(backend_env)
+except ImportError:
+    pass
 
 MONGODB_URL = os.getenv("MONGODB_URL")
 

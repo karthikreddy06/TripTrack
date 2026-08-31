@@ -1,23 +1,26 @@
 import sys
 from pathlib import Path
-from dotenv import load_dotenv
 
-# Base paths
+# Base paths - ensure backend-fastapi is in sys.path before any local imports
 ROOT_DIR = Path(__file__).resolve().parent.parent
 BACKEND_DIR = ROOT_DIR / "backend-fastapi"
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-# If running locally in dev, add venv site-packages so vercel dev finds installed dependencies
+# If running locally in dev, add venv site-packages so vercel dev / python finds installed dependencies
 VENV_PACKAGES = BACKEND_DIR / "venv" / "Lib" / "site-packages"
 if VENV_PACKAGES.exists() and str(VENV_PACKAGES) not in sys.path:
     sys.path.insert(0, str(VENV_PACKAGES))
 
-# Load local .env from backend directory if present (Vercel provides env vars via process.env)
-backend_env = BACKEND_DIR / ".env"
-if backend_env.exists():
-    load_dotenv(backend_env)
-load_dotenv()
+# Optionally load local .env in development; in production Vercel injects environment variables directly
+try:
+    from dotenv import load_dotenv
+    backend_env = BACKEND_DIR / ".env"
+    if backend_env.exists():
+        load_dotenv(backend_env)
+    load_dotenv()
+except ImportError:
+    pass
 
 # Import the single source of truth FastAPI app from backend-fastapi
 from app.main import app
@@ -58,7 +61,7 @@ if dist_dir.exists() and (dist_dir / "index.html").exists():
         # Do not catch API or docs routes; let them 404 naturally if endpoint doesn't exist
         if full_path.startswith("api") or full_path.startswith("docs") or full_path.startswith("openapi.json"):
             raise HTTPException(status_code=404, detail="Not Found")
-        
+
         # Check if requested path corresponds to a static file in dist
         file_path = dist_dir / full_path
         if file_path.exists() and file_path.is_file():
