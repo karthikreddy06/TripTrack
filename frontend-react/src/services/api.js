@@ -1,6 +1,17 @@
 import axios from 'axios';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
+// Base API URL configuration
+// In production on Vercel, requests use the same-origin '/api' endpoint.
+// In local development, VITE_API_URL points to 'http://127.0.0.1:8000' (or 'http://127.0.0.1:8000/api').
+const getBaseUrl = () => {
+  const envUrl = import.meta.env.VITE_API_URL;
+  if (envUrl) {
+    return envUrl.replace(/\/+$/, '');
+  }
+  return '/api';
+};
+
+const API_BASE_URL = getBaseUrl();
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,

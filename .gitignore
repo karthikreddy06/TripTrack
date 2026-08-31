@@ -67,3 +67,6 @@ Thumbs.db
 # Logs
 *.log
 logs/
+
+# Vercel local cache
+.vercel/

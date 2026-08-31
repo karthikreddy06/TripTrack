@@ -30,11 +30,14 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
-# Register API routers
+# Register API routers for root and /api prefixes
 app.include_router(users_router)
 app.include_router(trips_router)
+app.include_router(users_router, prefix="/api")
+app.include_router(trips_router, prefix="/api")
 
 
+@app.get("/api", tags=["General"], include_in_schema=False)
 @app.get("/", tags=["General"])
 def home():
     """Root endpoint verifying API availability."""
@@ -44,6 +47,7 @@ def home():
     }
 
 
+@app.get("/api/health", tags=["General"])
 @app.get("/health", tags=["General"])
 def health_check():
     """

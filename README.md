@@ -40,6 +40,9 @@ A full-stack travel planning and itinerary management application built with Fas
 
 ```text
 TravelTrack/
+├── api/
+│   └── index.py                 # Vercel Serverless Function entrypoint (FastAPI)
+│
 ├── backend-fastapi/
 │   ├── app/
 │   │   ├── database/
@@ -67,9 +70,43 @@ TravelTrack/
 │   ├── package.json             # Node dependencies & scripts
 │   └── .env.example             # Safe template for frontend variables
 │
+├── vercel.json                  # Single-project Vercel routing & build config
+├── requirements.txt             # Root requirements for Vercel Python runtime
+├── package.json                 # Monorepo build scripts
 ├── .gitignore                   # Comprehensive Git ignore rules
 └── README.md                    # Project documentation
 ```
+
+---
+
+## Deploying to Vercel (One Project, One Domain)
+
+TravelTrack is configured as a unified monorepo so that **React (frontend)** and **FastAPI (backend)** are deployed together on **one Vercel project** under a single public domain (e.g. `https://triptrack.vercel.app`).
+
+- **Frontend**: Served at `https://triptrack.vercel.app/`
+- **Backend API**: Served at `https://triptrack.vercel.app/api/...`
+
+### 1. Import Repository into Vercel
+1. Go to your [Vercel Dashboard](https://vercel.com/dashboard) and click **Add New... > Project**.
+2. Select your `TripTrack` GitHub repository.
+3. Keep the **Root Directory** as `./` (default).
+
+### 2. Configure Environment Variables in Vercel
+In the Vercel project setup screen, add the following under **Environment Variables**:
+
+| Variable Name | Description | Example Value |
+| :--- | :--- | :--- |
+| `MONGODB_URL` | MongoDB Atlas Connection String | `mongodb+srv://user:pass@cluster.mongodb.net/?retryWrites=true&w=majority` |
+| `DATABASE_NAME` | MongoDB database name | `traveltrack` |
+| `JWT_SECRET_KEY` | Strong random secret for token signing | *(your secure secret key)* |
+| `JWT_ALGORITHM` | JWT hashing algorithm | `HS256` |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | Access token lifespan in minutes | `30` |
+
+> [!NOTE]
+> `VITE_API_URL` is **not required** in production. The React frontend automatically routes requests to the same-origin `/api` path.
+
+### 3. Deploy
+Click **Deploy**. Vercel will automatically build the React frontend into static assets and deploy the FastAPI backend to Serverless Functions under `/api/*`.
 
 ---
 
