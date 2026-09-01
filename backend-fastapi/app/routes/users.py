@@ -19,10 +19,16 @@ def register_user(user: UserCreate):
     Register a new user with hashed password.
     Checks for duplicate emails and returns the newly created user_id.
     """
-    # Check if email already exists
-    existing_user = users_collection.find_one({
-        "email": user.email.lower()
-    })
+    try:
+        # Check if email already exists
+        existing_user = users_collection.find_one({
+            "email": user.email.lower()
+        })
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Database connection error: {str(exc)}"
+        )
 
     if existing_user:
         raise HTTPException(
@@ -43,7 +49,13 @@ def register_user(user: UserCreate):
         "password": hashed_password
     }
 
-    result = users_collection.insert_one(user_data)
+    try:
+        result = users_collection.insert_one(user_data)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Database insert error: {str(exc)}"
+        )
 
     return {
         "message": "User registered successfully",
@@ -56,10 +68,16 @@ def login_user(user: UserLogin):
     """
     Authenticate user credentials and issue a JWT access token.
     """
-    # Find user by email
-    existing_user = users_collection.find_one({
-        "email": user.email.lower()
-    })
+    try:
+        # Find user by email
+        existing_user = users_collection.find_one({
+            "email": user.email.lower()
+        })
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Database connection error: {str(exc)}"
+        )
 
     if not existing_user:
         raise HTTPException(
@@ -68,10 +86,13 @@ def login_user(user: UserLogin):
         )
 
     # Verify password against stored bcrypt hash
-    password_matches = bcrypt.checkpw(
-        user.password.encode("utf-8"),
-        existing_user["password"].encode("utf-8")
-    )
+    try:
+        password_matches = bcrypt.checkpw(
+            user.password.encode("utf-8"),
+            existing_user["password"].encode("utf-8")
+        )
+    except Exception:
+        password_matches = False
 
     if not password_matches:
         raise HTTPException(
@@ -88,6 +109,6 @@ def login_user(user: UserLogin):
         "access_token": access_token,
         "token_type": "bearer",
         "user_id": user_id_str,
-        "name": existing_user["name"],
+        "name": existing_user.get("name", ""),
         "email": existing_user["email"]
     }

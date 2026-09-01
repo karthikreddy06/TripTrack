@@ -28,7 +28,13 @@ def create_trip(
         )
 
     trip_data = trip.model_dump()
-    result = trips_collection.insert_one(trip_data)
+    try:
+        result = trips_collection.insert_one(trip_data)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Database insert error: {str(exc)}"
+        )
 
     return {
         "message": "Trip created successfully",
@@ -51,7 +57,13 @@ def get_user_trips(
             detail="You are not authorized to view another user's trips"
         )
 
-    trips = list(trips_collection.find({"user_id": current_user_id}))
+    try:
+        trips = list(trips_collection.find({"user_id": current_user_id}))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Database query error: {str(exc)}"
+        )
 
     for trip in trips:
         trip["_id"] = str(trip["_id"])
@@ -83,10 +95,17 @@ def update_trip(
 
     if not update_data:
         # Verify ownership and existence even when no fields are modified
-        existing = trips_collection.find_one({
-            "_id": ObjectId(trip_id),
-            "user_id": current_user_id
-        })
+        try:
+            existing = trips_collection.find_one({
+                "_id": ObjectId(trip_id),
+                "user_id": current_user_id
+            })
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Database query error: {str(exc)}"
+            )
+
         if not existing:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -96,10 +115,16 @@ def update_trip(
             "message": "Trip updated successfully"
         }
 
-    result = trips_collection.update_one(
-        {"_id": ObjectId(trip_id), "user_id": current_user_id},
-        {"$set": update_data}
-    )
+    try:
+        result = trips_collection.update_one(
+            {"_id": ObjectId(trip_id), "user_id": current_user_id},
+            {"$set": update_data}
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Database update error: {str(exc)}"
+        )
 
     if result.matched_count == 0:
         raise HTTPException(
@@ -127,10 +152,16 @@ def delete_trip(
             detail="Invalid trip ID format"
         )
 
-    result = trips_collection.delete_one({
-        "_id": ObjectId(trip_id),
-        "user_id": current_user_id
-    })
+    try:
+        result = trips_collection.delete_one({
+            "_id": ObjectId(trip_id),
+            "user_id": current_user_id
+        })
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Database delete error: {str(exc)}"
+        )
 
     if result.deleted_count == 0:
         raise HTTPException(

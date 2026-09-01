@@ -12,11 +12,46 @@ try:
 except ImportError:
     pass
 
-MONGODB_URL = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
-DATABASE_NAME = os.getenv("DATABASE_NAME", "traveltrack")
+def get_mongodb_url() -> str:
+    # Check common environment variable aliases
+    url = (
+        os.getenv("MONGODB_URL")
+        or os.getenv("MONGODB_URI")
+        or os.getenv("MONGO_URI")
+        or os.getenv("DATABASE_URL")
+        or ""
+    ).strip()
 
-# Initialize MongoClient with connect=False for serverless compatibility (avoids blocking DNS/connections on module import)
-client = MongoClient(MONGODB_URL, connect=False, serverSelectionTimeoutMS=5000)
+    # Strip optional surrounding single or double quotes
+    if (url.startswith('"') and url.endswith('"')) or (url.startswith("'") and url.endswith("'")):
+        url = url[1:-1].strip()
+
+    return url or "mongodb://localhost:27017"
+
+
+def get_database_name() -> str:
+    name = (
+        os.getenv("DATABASE_NAME")
+        or os.getenv("DB_NAME")
+        or "traveltrack"
+    ).strip()
+
+    if (name.startswith('"') and name.endswith('"')) or (name.startswith("'") and name.endswith("'")):
+        name = name[1:-1].strip()
+
+    return name or "traveltrack"
+
+
+MONGODB_URL = get_mongodb_url()
+DATABASE_NAME = get_database_name()
+
+# Initialize MongoClient with connect=False and standard 30-second timeout
+client = MongoClient(
+    MONGODB_URL,
+    connect=False,
+    serverSelectionTimeoutMS=30000,
+    socketTimeoutMS=30000,
+)
 
 # TravelTrack database and collections
 db = client[DATABASE_NAME]

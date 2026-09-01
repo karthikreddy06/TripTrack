@@ -85,20 +85,20 @@ def health_check():
     Pings MongoDB Atlas without exposing credentials on failure.
     """
     try:
-        from app.database.mongodb import client
+        from app.database.mongodb import client, DATABASE_NAME
 
         # Ping MongoDB Atlas
         client.admin.command("ping")
 
         return {
             "status": "healthy",
-            "database": "MongoDB Atlas connected"
+            "database": f"MongoDB Atlas connected ({DATABASE_NAME})"
         }
-    except Exception:
+    except Exception as exc:
         return JSONResponse(
             status_code=503,
             content={
                 "status": "unhealthy",
-                "database": "Database connection unavailable"
+                "database": f"Database connection unavailable: {type(exc).__name__}"
             }
         )

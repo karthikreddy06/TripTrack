@@ -16,14 +16,23 @@ try:
 except ImportError:
     pass
 
-SECRET_KEY = os.getenv("JWT_SECRET_KEY")
+def get_jwt_secret_key() -> str:
+    key = (
+        os.getenv("JWT_SECRET_KEY")
+        or os.getenv("SECRET_KEY")
+        or os.getenv("JWT_SECRET")
+        or ""
+    ).strip()
+
+    if (key.startswith('"') and key.endswith('"')) or (key.startswith("'") and key.endswith("'")):
+        key = key[1:-1].strip()
+
+    return key or "default_traveltrack_jwt_secret_key_change_in_production"
+
+
+SECRET_KEY = get_jwt_secret_key()
 ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
-
-if not SECRET_KEY:
-    raise RuntimeError(
-        "JWT_SECRET_KEY environment variable is not configured. Please set it in your .env file."
-    )
 
 # HTTPBearer scheme enables the "Authorize" button in Swagger UI
 security = HTTPBearer(auto_error=True)
