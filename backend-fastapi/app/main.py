@@ -1,9 +1,21 @@
+import os
+from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.routes.users import router as users_router
 from app.routes.trips import router as trips_router
+
+# Load environment variables from local .env file if available
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+    backend_env = Path(__file__).resolve().parent.parent / ".env"
+    if backend_env.exists():
+        load_dotenv(backend_env)
+except ImportError:
+    pass
 
 
 app = FastAPI(
@@ -12,7 +24,7 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Configure CORS for React frontend (Vite & Create React App dev servers)
+# Configure CORS for React frontend (Vite & Create React App dev servers, Render production)
 origins = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
@@ -20,11 +32,21 @@ origins = [
     "http://127.0.0.1:5173",
     "http://localhost:5174",
     "http://127.0.0.1:5174",
+    "https://triptrack-frontend.onrender.com",
 ]
+
+# Add production frontend URL from environment variable if provided
+frontend_url_env = os.getenv("FRONTEND_URL")
+if frontend_url_env:
+    for url in frontend_url_env.split(","):
+        cleaned_url = url.strip().rstrip("/")
+        if cleaned_url and cleaned_url not in origins:
+            origins.append(cleaned_url)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
+    allow_origin_regex=r"^https:\/\/.*\.onrender\.com$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"]

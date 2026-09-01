@@ -40,74 +40,103 @@ A full-stack travel planning and itinerary management application built with Fas
 
 ```text
 TravelTrack/
-├── api/
-│   └── index.py                 # Vercel Serverless Function entrypoint (FastAPI)
-│
 ├── backend-fastapi/
 │   ├── app/
 │   │   ├── database/
-│   │   │   └── mongodb.py       # MongoDB client & collection handles
+│   │   │   └── mongodb.py       # MongoDB Atlas client & collection handles
 │   │   ├── routes/
-│   │   │   ├── users.py         # Registration & login endpoints
-│   │   │   └── trips.py         # CRUD trip operations & access control
+│   │   │   ├── users.py         # Registration & bcrypt login endpoints
+│   │   │   └── trips.py         # CRUD trip operations & user access control
 │   │   ├── schemas/
 │   │   │   ├── user.py          # User registration schema
 │   │   │   ├── login.py         # User login schema
 │   │   │   └── trip.py          # Trip creation & update schemas
-│   │   ├── auth.py              # JWT encoding, decoding & dependencies
-│   │   └── main.py              # FastAPI app instance, CORS & health check
+│   │   ├── auth.py              # JWT encoding, decoding & auth dependencies
+│   │   └── main.py              # FastAPI app instance, CORS & health checks
 │   ├── requirements.txt         # Python backend dependencies
 │   └── .env.example             # Safe template for backend variables
 │
 ├── frontend-react/
-│   ├── public/                  # Static assets & favicons
+│   ├── public/                  # Static assets & icons
 │   ├── src/
 │   │   ├── components/          # Reusable UI components (Navbar, Cards, Alerts)
 │   │   ├── context/             # React AuthContext provider
 │   │   ├── pages/               # Views (Login, Register, Dashboard, MyTrips, Forms)
 │   │   ├── services/            # Axios API client & error handling
 │   │   └── styles/              # Botanical design tokens & component CSS
-│   ├── package.json             # Node dependencies & scripts
+│   ├── package.json             # Frontend dependencies & scripts
+│   ├── vite.config.js           # Vite configuration
 │   └── .env.example             # Safe template for frontend variables
 │
-├── vercel.json                  # Single-project Vercel routing & build config
-├── requirements.txt             # Root requirements for Vercel Python runtime
-├── package.json                 # Monorepo build scripts
 ├── .gitignore                   # Comprehensive Git ignore rules
 └── README.md                    # Project documentation
 ```
 
 ---
 
-## Deploying to Vercel (One Project, One Domain)
+## Deploying to Render
 
-TravelTrack is configured as a unified monorepo so that **React (frontend)** and **FastAPI (backend)** are deployed together on **one Vercel project** under a single public domain (e.g. `https://triptrack.vercel.app`).
+TravelTrack is deployed to Render using a decoupled full-stack architecture:
+1. **Backend**: Render Web Service (FastAPI)
+2. **Frontend**: Render Static Site (React / Vite SPA)
 
-- **Frontend**: Served at `https://triptrack.vercel.app/`
-- **Backend API**: Served at `https://triptrack.vercel.app/api/...`
+---
 
-### 1. Import Repository into Vercel
-1. Go to your [Vercel Dashboard](https://vercel.com/dashboard) and click **Add New... > Project**.
-2. Select your `TripTrack` GitHub repository.
-3. Keep the **Root Directory** as `./` (default).
+### Step 1: Deploy Backend (Render Web Service)
 
-### 2. Configure Environment Variables in Vercel
-In the Vercel project setup screen, add the following under **Environment Variables**:
+1. In the [Render Dashboard](https://dashboard.render.com), click **New + > Web Service**.
+2. Connect your `TripTrack` GitHub repository.
+3. Configure the service settings:
+   - **Name**: `traveltrack-api` (or your preferred name)
+   - **Language**: `Python 3`
+   - **Region**: Select your preferred region
+   - **Branch**: `main`
+   - **Root Directory**: `backend-fastapi`
+   - **Build Command**: `pip install -r requirements.txt`
+   - **Start Command**: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+
+4. Add **Environment Variables** in the Render Web Service settings:
 
 | Variable Name | Description | Example Value |
 | :--- | :--- | :--- |
 | `MONGODB_URL` | MongoDB Atlas Connection String | `mongodb+srv://user:pass@cluster.mongodb.net/?retryWrites=true&w=majority` |
 | `DATABASE_NAME` | MongoDB database name | `traveltrack` |
 | `JWT_SECRET_KEY` | Strong random secret for token signing | *(your secure secret key)* |
-| `JWT_ALGORITHM` | JWT hashing algorithm | `HS256` |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | Access token lifespan in minutes | `30` |
+| `JWT_ALGORITHM` | JWT algorithm | `HS256` |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | Token lifetime in minutes | `30` |
+| `FRONTEND_URL` | Render Frontend URL for CORS | `https://traveltrack.onrender.com` |
 
-> [!NOTE]
-> `VITE_API_URL` is **not required** in production. The React frontend automatically routes requests to the same-origin `/api` path.
-> The root `vercel.json` configures the static build output to `dist` and routes all API calls to `api/index.py`.
+5. Click **Create Web Service**. Note your backend URL (e.g. `https://traveltrack-api.onrender.com`).
 
-### 3. Deploy
-Click **Deploy**. Vercel will run `npm run build`, output the frontend assets into `dist/`, and deploy the FastAPI backend as serverless functions under `/api/*`. Client routes (e.g. `/dashboard`, `/login`) are automatically rewritten to `/index.html` with resilient SPA fallbacks.
+---
+
+### Step 2: Deploy Frontend (Render Static Site)
+
+1. In the [Render Dashboard](https://dashboard.render.com), click **New + > Static Site**.
+2. Connect your `TripTrack` GitHub repository.
+3. Configure the static site settings:
+   - **Name**: `traveltrack` (or your preferred name)
+   - **Branch**: `main`
+   - **Root Directory**: `frontend-react`
+   - **Build Command**: `npm install && npm run build`
+   - **Publish Directory**: `dist`
+
+4. Add **Environment Variables** for the Static Site:
+
+| Variable Name | Description | Example Value |
+| :--- | :--- | :--- |
+| `VITE_API_URL` | Render Backend Web Service URL | `https://traveltrack-api.onrender.com` |
+
+5. Configure **Client-Side SPA Routing Rewrite Rule**:
+   - In your Render Static Site dashboard, navigate to **Redirects / Rewrites**.
+   - Click **Add Rule**:
+     - **Source**: `/*`
+     - **Destination**: `/index.html`
+     - **Action**: `Rewrite`
+
+6. Click **Create Static Site**.
+
+7. Once deployed, update your Backend `FRONTEND_URL` environment variable if needed to match the assigned Render frontend domain.
 
 ---
 
