@@ -1,37 +1,27 @@
-import { useEffect, useRef, useState } from 'react';
-import { Loader } from '@googlemaps/js-api-loader';
-import { MarkerClusterer } from '@googlemaps/markerclusterer';
-import { AlertCircle, Compass } from 'lucide-react';
+import { useEffect, useRef, useState, useCallback } from 'react';
+import mapboxgl from 'mapbox-gl';
+import 'mapbox-gl/dist/mapbox-gl.css';
+import { MapPin, Navigation, Compass, AlertCircle } from 'lucide-react';
 
-const TRAVELTRACK_MAP_STYLES = [
-  { elementType: 'geometry', stylers: [{ color: '#f7f8f4' }] },
-  { elementType: 'labels.text.stroke', stylers: [{ color: '#ffffff' }] },
-  { elementType: 'labels.text.fill', stylers: [{ color: '#384639' }] },
-  { featureType: 'administrative.locality', elementType: 'labels.text.fill', stylers: [{ color: '#1f2b20' }] },
-  { featureType: 'poi', elementType: 'labels.text.fill', stylers: [{ color: '#4a5d4c' }] },
-  { featureType: 'poi.park', elementType: 'geometry', stylers: [{ color: '#e6ede0' }] },
-  { featureType: 'poi.park', elementType: 'labels.text.fill', stylers: [{ color: '#2d4730' }] },
-  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#ffffff' }] },
-  { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#e2e7dc' }] },
-  { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#ebece4' }] },
-  { featureType: 'road.highway', elementType: 'geometry.stroke', stylers: [{ color: '#dadfd4' }] },
-  { featureType: 'transit', elementType: 'geometry', stylers: [{ color: '#edf2e7' }] },
-  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#d3e2db' }] },
-  { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#577970' }] }
-];
+const CATEGORY_COLORS = {
+  hotel: '#244B7A',
+  restaurant: '#A03E1C',
+  activity: '#61402B',
+  attraction: '#2C3E2D',
+  destination: '#1F2B20',
+};
 
 const getCategoryColor = (category) => {
-  switch (category?.toLowerCase()) {
-    case 'hotel':
-      return '#244B7A';
-    case 'restaurant':
-      return '#A03E1C';
-    case 'activity':
-      return '#61402B';
-    case 'attraction':
-    default:
-      return '#2C3E2D';
+  return CATEGORY_COLORS[category?.toLowerCase()] || '#2C3E2D';
+};
+
+const getValidCoordinates = (place) => {
+  const lat = place?.lat ?? place?.latitude;
+  const lon = place?.lon ?? place?.longitude ?? place?.lng;
+  if (typeof lat === 'number' && typeof lon === 'number' && !isNaN(lat) && !isNaN(lon)) {
+    return { lat, lon };
   }
+  return null;
 };
 
 export const MapView = ({
@@ -42,252 +32,226 @@ export const MapView = ({
   selectedPlaceId = null,
   onSelectPlace = null,
 }) => {
-  const mapRef = useRef(null);
+  const mapContainerRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const markersRef = useRef([]);
-  const clustererRef = useRef(null);
-  const infoWindowRef = useRef(null);
-  const isLoadedRef = useRef(false);
+  const popupRef = useRef(null);
 
   const [mapError, setMapError] = useState(null);
-  const [apiKeyMissing, setApiKeyMissing] = useState(false);
+  const [tokenMissing, setTokenMissing] = useState(false);
 
-  const apiKey = (import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '').trim();
+  const mapboxToken = (import.meta.env.VITE_MAPBOX_ACCESS_TOKEN || '').trim();
 
-  // Initialize Google Maps instance
+  // Initialize Mapbox instance
   useEffect(() => {
-    if (!apiKey) {
-      setApiKeyMissing(true);
+    if (!mapboxToken) {
+      setTokenMissing(true);
       return;
     }
 
-    let isMounted = true;
+    setTokenMissing(false);
+    mapboxgl.accessToken = mapboxToken;
 
-    const initMap = async () => {
-      try {
-        const loader = new Loader({
-          apiKey: apiKey,
-          version: 'weekly',
-          libraries: ['maps', 'marker']
-        });
+    const initialCenter = Array.isArray(center)
+      ? [center[1], center[0]]
+      : [center.lng ?? center.lon ?? 78.4867, center.lat ?? 17.3850];
 
-        const [mapsLib, markerLib] = await Promise.all([
-          loader.importLibrary('maps'),
-          loader.importLibrary('marker')
-        ]);
+    try {
+      const map = new mapboxgl.Map({
+        container: mapContainerRef.current,
+        style: 'mapbox://styles/mapbox/light-v11',
+        center: initialCenter,
+        zoom: zoom,
+        attributionControl: false,
+      });
 
-        if (!isMounted || !mapRef.current) return;
+      // Add navigation controls
+      map.addControl(new mapboxgl.NavigationControl({ showCompass: true }), 'top-right');
+      map.addControl(new mapboxgl.AttributionControl({ compact: true }), 'bottom-right');
 
-        const defaultCenter = Array.isArray(center)
-          ? { lat: center[0], lng: center[1] }
-          : center;
+      mapInstanceRef.current = map;
+      setMapError(null);
 
-        const map = new mapsLib.Map(mapRef.current, {
-          center: defaultCenter,
-          zoom: zoom,
-          styles: TRAVELTRACK_MAP_STYLES,
-          mapTypeControl: false,
-          streetViewControl: false,
-          fullscreenControl: true,
-          zoomControl: true,
-          mapId: 'TRAVELTRACK_BOTANICAL_MAP'
-        });
-
-        infoWindowRef.current = new mapsLib.InfoWindow();
-        mapInstanceRef.current = map;
-        isLoadedRef.current = true;
-        setMapError(null);
-      } catch (err) {
-        if (isMounted) {
-          setMapError(err.message || 'Failed to load Google Maps');
+      map.on('error', (e) => {
+        if (e && e.error && e.error.status === 401) {
+          setMapError('Invalid Mapbox access token. Please check VITE_MAPBOX_ACCESS_TOKEN.');
         }
-      }
-    };
-
-    initMap();
+      });
+    } catch (err) {
+      setMapError(err.message || 'Failed to initialize Mapbox');
+    }
 
     return () => {
-      isMounted = false;
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.remove();
+        mapInstanceRef.current = null;
+      }
     };
-  }, [apiKey]);
+  }, [mapboxToken, zoom]);
 
   // Update Markers & Bounds whenever places change
-  useEffect(() => {
-    if (!mapInstanceRef.current || !window.google?.maps) return;
-
+  const updateMarkers = useCallback(() => {
     const map = mapInstanceRef.current;
-    const infoWindow = infoWindowRef.current;
+    if (!map) return;
 
-    // Clear previous markers & clusterer
-    if (clustererRef.current) {
-      clustererRef.current.clearMarkers();
-    }
-    markersRef.current.forEach((m) => {
-      if (m.map) m.map = null;
-    });
+    // Clear previous markers
+    markersRef.current.forEach((m) => m.remove());
     markersRef.current = [];
 
-    const validPlaces = places.filter((p) => p.lat && p.lon);
+    if (popupRef.current) {
+      popupRef.current.remove();
+      popupRef.current = null;
+    }
+
+    const validPlaces = places
+      .map((p) => ({ place: p, coords: getValidCoordinates(p) }))
+      .filter((item) => item.coords !== null);
+
     if (validPlaces.length === 0) return;
 
-    const bounds = new window.google.maps.LatLngBounds();
-    const newMarkers = [];
+    const bounds = new mapboxgl.LngLatBounds();
 
-    validPlaces.forEach((p) => {
-      const pos = { lat: p.lat, lng: p.lon };
-      bounds.extend(pos);
+    validPlaces.forEach(({ place, coords }, idx) => {
+      const isSelected = selectedPlaceId && (place.place_id === selectedPlaceId || place.provider_place_id === selectedPlaceId);
+      const catColor = getCategoryColor(place.category);
 
-      // Create Custom Pin Element
-      const pinColor = getCategoryColor(p.category);
-      const pinContainer = document.createElement('div');
-      pinContainer.className = `custom-google-pin ${selectedPlaceId === p.place_id ? 'active' : ''}`;
-      pinContainer.style.cssText = `
-        background-color: ${pinColor};
-        width: 30px;
-        height: 30px;
-        border-radius: 50% 50% 50% 0;
-        transform: rotate(-45deg);
+      // Create Custom DOM Element for Marker
+      const el = document.createElement('div');
+      el.className = `mapbox-custom-marker ${isSelected ? 'selected' : ''}`;
+      el.style.cssText = `
         display: flex;
         align-items: center;
         justify-content: center;
-        border: 2px solid #FFFFFF;
-        box-shadow: 0 3px 8px rgba(0,0,0,0.28);
-        cursor: pointer;
-        transition: transform 0.2s ease, box-shadow 0.2s ease;
-      `;
-
-      const innerDot = document.createElement('div');
-      innerDot.style.cssText = `
-        width: 8px;
-        height: 8px;
-        background-color: #FFFFFF;
+        width: ${isSelected ? '36px' : '28px'};
+        height: ${isSelected ? '36px' : '28px'};
+        background-color: ${isSelected ? 'var(--primary-green, #2C3E2D)' : catColor};
+        color: #ffffff;
         border-radius: 50%;
-        transform: rotate(45deg);
+        border: 2px solid #ffffff;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.22);
+        cursor: pointer;
+        font-family: var(--font-mono, monospace);
+        font-size: ${isSelected ? '12px' : '10px'};
+        font-weight: 700;
+        transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s ease;
       `;
-      pinContainer.appendChild(innerDot);
+      el.innerText = `${idx + 1}`;
 
-      let marker;
-      if (window.google.maps.marker && window.google.maps.marker.AdvancedMarkerElement) {
-        marker = new window.google.maps.marker.AdvancedMarkerElement({
-          map: map,
-          position: pos,
-          title: p.name,
-          content: pinContainer
-        });
-      } else {
-        marker = new window.google.maps.Marker({
-          map: map,
-          position: pos,
-          title: p.name
-        });
-      }
+      // Create Popup
+      const popupHtml = `
+        <div style="font-family: inherit; padding: 4px; max-width: 220px;">
+          <span style="font-size: 9px; text-transform: uppercase; font-weight: 700; color: ${catColor}; letter-spacing: 0.05em;">
+            ${place.category?.toUpperCase() || 'PLACE'}
+          </span>
+          <h4 style="margin: 4px 0 2px 0; font-size: 13px; font-weight: 600; color: #1f2b20;">
+            ${place.name}
+          </h4>
+          <p style="margin: 0; font-size: 11px; color: #64748b; line-height: 1.3;">
+            ${place.address || place.location || ''}
+          </p>
+          ${place.rating ? `<div style="margin-top: 4px; font-size: 11px; font-weight: 600; color: #d97706;">★ ${Number(place.rating).toFixed(1)}</div>` : ''}
+        </div>
+      `;
 
-      marker.placeData = p;
+      const popup = new mapboxgl.Popup({ offset: 25, closeButton: false }).setHTML(popupHtml);
 
-      // Click listener on marker
-      marker.addListener('click', () => {
-        const contentStr = `
-          <div style="font-family: var(--font-sans, system-ui); max-width: 220px; padding: 4px;">
-            <div style="font-size: 10px; text-transform: uppercase; font-weight: 700; color: ${pinColor}; letter-spacing: 0.05em; margin-bottom: 3px;">
-              ${p.category || 'Place'}
-            </div>
-            <div style="font-weight: 600; font-size: 14px; color: #1B241C; line-height: 1.25; margin-bottom: 4px;">
-              ${p.name}
-            </div>
-            <div style="font-size: 11px; color: #5C6E5E; margin-bottom: 6px;">
-              ${p.address || p.location || ''}
-            </div>
-            ${p.rating ? `<div style="font-size: 11px; font-weight: 700; color: #8A624A; margin-bottom: 8px;">★ ${p.rating.toFixed(1)} ${p.review_count ? `(${p.review_count})` : ''}</div>` : ''}
-            <a href="/explore/place/${encodeURIComponent(p.place_id)}" style="display: inline-block; font-size: 11px; font-weight: 600; background: #2C3E2D; color: #FFFFFF; padding: 4px 10px; border-radius: 4px; text-decoration: none;">
-              View Details →
-            </a>
-          </div>
-        `;
-        infoWindow.setContent(contentStr);
-        infoWindow.open({
-          anchor: marker,
-          map: map
-        });
+      const marker = new mapboxgl.Marker(el)
+        .setLngLat([coords.lon, coords.lat])
+        .setPopup(popup)
+        .addTo(map);
 
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
         if (onSelectPlace) {
-          onSelectPlace(p);
+          onSelectPlace(place);
         }
       });
 
-      newMarkers.push(marker);
+      markersRef.current.push(marker);
+      bounds.extend([coords.lon, coords.lat]);
+
+      if (isSelected) {
+        popupRef.current = popup;
+        marker.togglePopup();
+      }
     });
 
-    markersRef.current = newMarkers;
-
-    // Initialize marker clusterer
-    try {
-      clustererRef.current = new MarkerClusterer({
-        map: map,
-        markers: newMarkers
+    // Fit map to markers bounds
+    if (!bounds.isEmpty()) {
+      map.fitBounds(bounds, {
+        padding: { top: 60, bottom: 60, left: 60, right: 60 },
+        maxZoom: 15,
+        duration: 1000,
       });
-    } catch {
-      // Fallback
-    }
-
-    // Auto-fit bounds
-    if (validPlaces.length > 1) {
-      map.fitBounds(bounds, { top: 40, right: 40, bottom: 40, left: 40 });
-    } else if (validPlaces.length === 1) {
-      map.setCenter({ lat: validPlaces[0].lat, lng: validPlaces[0].lon });
-      map.setZoom(14);
     }
   }, [places, selectedPlaceId, onSelectPlace]);
 
-  if (apiKeyMissing) {
-    return (
-      <div
-        className="map-fallback-banner"
-        style={{
-          height: height,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: 'linear-gradient(135deg, #FAFBF7 0%, #F1F5EA 100%)',
-          border: '1px solid var(--border)',
-          borderRadius: 'var(--radius-lg, 12px)',
-          padding: '2rem',
-          textAlign: 'center'
-        }}
-      >
-        <Compass size={36} style={{ color: 'var(--primary-green)', marginBottom: '0.75rem' }} />
-        <h4 style={{ margin: '0 0 0.4rem', fontSize: '1.2rem', color: 'var(--text-primary)' }}>
-          Professional Google Maps
-        </h4>
-        <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', maxWidth: '480px', margin: '0 0 1rem', lineHeight: '1.5' }}>
-          Interactive maps with Advanced Markers are ready. To enable live map rendering, set <code>VITE_GOOGLE_MAPS_API_KEY</code> in your environment.
-        </p>
-        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-          Showing {places.filter((p) => p.lat && p.lon).length} mapped coordinates ready for display
-        </span>
-      </div>
-    );
-  }
+  useEffect(() => {
+    updateMarkers();
+  }, [updateMarkers]);
 
-  if (mapError) {
+  // Focus selected place when selectedPlaceId changes
+  useEffect(() => {
+    if (!selectedPlaceId || !mapInstanceRef.current) return;
+
+    const target = places.find(
+      (p) => p.place_id === selectedPlaceId || p.provider_place_id === selectedPlaceId
+    );
+    const coords = getValidCoordinates(target);
+
+    if (coords) {
+      mapInstanceRef.current.flyTo({
+        center: [coords.lon, coords.lat],
+        zoom: Math.max(mapInstanceRef.current.getZoom(), 14),
+        essential: true,
+        duration: 1200,
+      });
+    }
+  }, [selectedPlaceId, places]);
+
+  if (tokenMissing || mapError) {
     return (
       <div
-        className="map-fallback-banner"
+        className="map-view-container card map-fallback-container"
         style={{
           height: height,
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
-          background: 'var(--surface-cream)',
+          padding: '2rem',
+          textAlign: 'center',
+          background: 'linear-gradient(135deg, #f5f6f2 0%, #ebeee7 100%)',
           border: '1px solid var(--border)',
           borderRadius: 'var(--radius-lg)',
-          padding: '2rem',
-          textAlign: 'center'
         }}
       >
-        <AlertCircle size={32} style={{ color: 'var(--accent)', marginBottom: '0.5rem' }} />
-        <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>{mapError}</p>
+        <div
+          style={{
+            width: '48px',
+            height: '48px',
+            borderRadius: '50%',
+            backgroundColor: '#ffffff',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.06)',
+            marginBottom: '1rem',
+            color: 'var(--primary-green)',
+          }}
+        >
+          <Compass size={24} />
+        </div>
+        <h4 style={{ fontSize: '1.15rem', marginBottom: '0.4rem', color: 'var(--text-main)' }}>
+          Interactive Map
+        </h4>
+        <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', maxWidth: '360px', margin: 0 }}>
+          {mapError ? mapError : 'Map temporarily unavailable. To enable live map exploration, configure VITE_MAPBOX_ACCESS_TOKEN.'}
+        </p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '1rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+          <MapPin size={12} />
+          <span>{places.length} verified coordinate markers ready</span>
+        </div>
       </div>
     );
   }
@@ -296,16 +260,19 @@ export const MapView = ({
     <div
       className="map-view-wrapper"
       style={{
-        width: '100%',
         height: height,
-        borderRadius: 'var(--radius-lg, 12px)',
+        width: '100%',
+        position: 'relative',
+        borderRadius: 'var(--radius-lg)',
         overflow: 'hidden',
         border: '1px solid var(--border)',
-        position: 'relative',
-        zIndex: 1
       }}
     >
-      <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
+      <div
+        ref={mapContainerRef}
+        style={{ width: '100%', height: '100%' }}
+        className="mapbox-gl-map-container"
+      />
     </div>
   );
 };

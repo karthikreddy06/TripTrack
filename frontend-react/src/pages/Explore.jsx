@@ -13,7 +13,7 @@ import {
   Layers,
   RotateCcw
 } from 'lucide-react';
-import { exploreAPI, extractErrorMessage } from '../services/api';
+import { exploreAPI, resolveImageUrl, extractErrorMessage } from '../services/api';
 import { PlaceCard } from '../components/PlaceCard';
 import { MapView } from '../components/MapView';
 import { AddToTripModal } from '../components/AddToTripModal';
@@ -207,7 +207,7 @@ export const Explore = () => {
           onClick={() => setShowMap(!showMap)}
         >
           {showMap ? <Grid size={13} /> : <Map size={13} />}
-          <span>{showMap ? 'Hide Map' : 'View on Google Map'}</span>
+          <span>{showMap ? 'Hide Map' : 'Interactive Map'}</span>
         </button>
       </div>
 
@@ -217,13 +217,20 @@ export const Explore = () => {
       {destinationInfo && (
         <div className="card destination-overview-banner" style={{ marginBottom: '2rem' }}>
           <div className="dest-banner-grid">
-            {destinationInfo.image_url && (
+            {destinationInfo.image_url ? (
               <img
-                src={destinationInfo.image_url}
+                src={resolveImageUrl(destinationInfo.image_url)}
                 alt={destinationInfo.destination}
                 className="dest-banner-image"
                 loading="lazy"
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none';
+                }}
               />
+            ) : (
+              <div className="dest-banner-placeholder">
+                <Compass size={32} style={{ color: 'var(--primary-green)' }} />
+              </div>
             )}
             <div className="dest-banner-content">
               <div className="editorial-mark">

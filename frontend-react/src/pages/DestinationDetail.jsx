@@ -14,7 +14,7 @@ import {
   Map,
   Grid
 } from 'lucide-react';
-import { exploreAPI, extractErrorMessage } from '../services/api';
+import { exploreAPI, resolveImageUrl, extractErrorMessage } from '../services/api';
 import { PlaceCard } from '../components/PlaceCard';
 import { MapView } from '../components/MapView';
 import { AddToTripModal } from '../components/AddToTripModal';
@@ -138,13 +138,20 @@ export const DestinationDetail = () => {
       {/* Destination Hero Header */}
       <div className="destination-hero-header card">
         <div className="dest-hero-grid">
-          {destSummary.image_url && (
+          {destSummary.image_url ? (
             <img
-              src={destSummary.image_url}
+              src={resolveImageUrl(destSummary.image_url)}
               alt={destSummary.destination}
               className="dest-hero-image"
               loading="lazy"
+              onError={(e) => {
+                e.currentTarget.style.display = 'none';
+              }}
             />
+          ) : (
+            <div className="dest-hero-placeholder" style={{ height: '260px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--surface)', borderRadius: 'var(--radius-lg)' }}>
+              <Compass size={40} style={{ color: 'var(--primary-green)' }} />
+            </div>
           )}
 
           <div className="dest-hero-content">

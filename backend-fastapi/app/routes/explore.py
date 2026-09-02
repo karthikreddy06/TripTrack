@@ -8,8 +8,8 @@ from app.schemas.explore import (
     PlaceDetailsResponse,
     PlaceItem
 )
-from app.services.places_provider import places_provider, VERIFIED_DESTINATIONS
-from app.services.google_places_provider import google_places_provider, VERIFIED_REAL_PLACES
+from app.services.places_provider import places_provider
+from app.services.google_places_provider import google_places_provider
 
 router = APIRouter(prefix="/explore", tags=["Explore & Travel Discovery"])
 
@@ -19,28 +19,8 @@ async def get_featured_destinations():
     """
     Retrieve curated featured destinations for the Explore landing page.
     """
-    featured = []
-    for key, data in VERIFIED_DESTINATIONS.items():
-        places = [VERIFIED_REAL_PLACES[pid] for pid in data.get("place_ids", []) if pid in VERIFIED_REAL_PLACES]
-        featured.append(
-            DestinationSummary(
-                destination=data["destination"],
-                country=data["country"],
-                lat=data["lat"],
-                lon=data["lon"],
-                description=data["description"],
-                image_url=data["image_url"],
-                overview=data["overview"],
-                best_time_to_visit=data["best_time_to_visit"],
-                currency=data["currency"],
-                highlights=[PlaceItem(**p) for p in places if p["category"] in ["attraction", "activity"]],
-                hotels=[PlaceItem(**p) for p in places if p["category"] == "hotel"],
-                restaurants=[PlaceItem(**p) for p in places if p["category"] == "restaurant"],
-                attractions=[PlaceItem(**p) for p in places if p["category"] == "attraction"],
-                activities=[PlaceItem(**p) for p in places if p["category"] == "activity"],
-            )
-        )
-    return featured
+    featured = await places_provider.get_featured_destinations()
+    return [DestinationSummary(**d) for d in featured]
 
 
 @router.get("/search", response_model=ExploreSearchResponse)

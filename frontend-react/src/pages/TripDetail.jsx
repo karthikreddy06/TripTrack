@@ -20,7 +20,7 @@ import {
   Check
 } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
-import { tripsAPI, itineraryAPI, expensesAPI, aiAPI, extractErrorMessage } from '../services/api';
+import { tripsAPI, itineraryAPI, expensesAPI, aiAPI, resolveImageUrl, extractErrorMessage } from '../services/api';
 import { StatusBadge } from '../components/StatusBadge';
 import { DeleteModal } from '../components/DeleteModal';
 
@@ -530,13 +530,30 @@ export const TripDetail = () => {
                         {dayActivities.map((act) => (
                           <div key={act._id} className="timeline-activity-card">
                             <div className="activity-time-col">
-                              <Clock size={13} style={{ color: 'var(--primary-green)' }} />
-                              <span>{act.time || 'All Day'}</span>
+                              {act.image_url ? (
+                                <img
+                                  src={resolveImageUrl(act.image_url)}
+                                  alt={act.title}
+                                  className="activity-item-thumb"
+                                  style={{ width: '42px', height: '42px', borderRadius: 'var(--radius-sm)', objectFit: 'cover', border: '1px solid var(--border)', marginBottom: '0.35rem' }}
+                                  loading="lazy"
+                                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                />
+                              ) : null}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                <Clock size={12} style={{ color: 'var(--primary-green)' }} />
+                                <span>{act.time || 'All Day'}</span>
+                              </div>
                             </div>
 
                             <div className="activity-content-col">
                               <div className="activity-header-row">
                                 <h4 className="activity-title">{act.title}</h4>
+                                {act.category && (
+                                  <span className="category-tag-badge" style={{ fontSize: '0.65rem', padding: '0.1rem 0.4rem', textTransform: 'uppercase' }}>
+                                    {act.category}
+                                  </span>
+                                )}
                                 {act.cost > 0 && (
                                   <span className="activity-cost-tag">
                                     {formatCurrency(act.cost)}
