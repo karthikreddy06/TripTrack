@@ -3,11 +3,13 @@ import time
 from typing import Dict, List, Optional, Any
 import httpx
 
-# Public Overpass API mirrors
+# Public Overpass API mirrors ordered by reliability
 OVERPASS_ENDPOINTS = [
-    "https://overpass-api.de/api/interpreter",
-    "https://overpass.kumi.systems/api/interpreter",
     "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+    "https://lz4.overpass-api.de/api/interpreter",
+    "https://z.overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass-api.de/api/interpreter",
 ]
 
 # Category mapping from OpenStreetMap tags to canonical Explore categories
@@ -60,27 +62,28 @@ OSM_CATEGORY_MAP = {
 class OverpassService:
     """
     Service for querying OpenStreetMap elements via the Overpass API.
-    Provides real place discovery without Google Maps/Places or Mapbox dependencies.
+    Provides 100% dynamic worldwide place discovery.
     """
 
     def __init__(self):
         self.headers = {
-            "User-Agent": "TravelTrack-Explore/3.0 (https://triptrack-frontend.onrender.com; info@triptrack.app)",
+            "User-Agent": "TravelTrack-Explore/4.0 (https://triptrack-frontend.onrender.com; info@triptrack.app)",
             "Accept": "application/json",
         }
-        self.timeout = httpx.Timeout(4.0, connect=2.0)
+        self.timeout = httpx.Timeout(5.0, connect=2.0)
         self._cache: Dict[str, tuple[float, List[Dict[str, Any]]]] = {}
         self.cache_ttl = 86400  # 24 hours
 
     def _get_cache(self, key: str) -> Optional[List[Dict[str, Any]]]:
         if key in self._cache:
             ts, val = self._cache[key]
-            if time.time() - ts < self.cache_ttl:
+            if time.time() - ts < self.cache_ttl and len(val) > 0:
                 return val
         return None
 
     def _set_cache(self, key: str, val: List[Dict[str, Any]]):
-        self._cache[key] = (time.time(), val)
+        if val and len(val) > 0:
+            self._cache[key] = (time.time(), val)
 
     def _map_osm_category(self, tags: Dict[str, str]) -> str:
         """
@@ -195,7 +198,7 @@ class OverpassService:
 (
 {body}
 );
-out center tags 60;
+out center tags 50;
 """
         return query
 
@@ -214,27 +217,36 @@ out center tags 60;
         lat: float,
         lon: float,
         category: str = "all",
-        radius: int = 15000
+        radius: int = 12000
     ) -> List[Dict[str, Any]]:
         """
         Query Overpass API around given coordinates and return deduplicated, normalized place items.
-        Queries mirrors with fast parallel fallbacks.
+        Queries mirrors with fast parallel fallbacks and immediate cancellation of remaining tasks.
         """
         cache_key = f"overpass:{round(lat, 3)}:{round(lon, 3)}:{category.lower()}"
         cached = self._get_cache(cache_key)
-        if cached is not None:
+        if cached is not None and len(cached) > 0:
             return cached
 
         query = self._build_overpass_query(lat, lon, category, radius)
         elements = []
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            tasks = [self._query_single_endpoint(client, ep, query) for ep in OVERPASS_ENDPOINTS]
-            # Run mirrors concurrently, pick first successful non-empty result
-            for coro in asyncio.as_completed(tasks):
-                res_elements = await coro
-                if res_elements:
-                    elements = res_elements
+            pending = [asyncio.create_task(self._query_single_endpoint(client, ep, query)) for ep in OVERPASS_ENDPOINTS]
+            while pending:
+                done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+                for task in done:
+                    try:
+                        res_elements = task.result()
+                        if res_elements:
+                            elements = res_elements
+                            for p in pending:
+                                p.cancel()
+                            pending = []
+                            break
+                    except Exception:
+                        pass
+                if elements:
                     break
 
         # Parse, filter, and deduplicate
@@ -261,7 +273,6 @@ out center tags 60;
             if canonical_id in seen_ids:
                 continue
 
-            # Extract latitude and longitude (nodes have lat/lon directly; ways have center.lat/center.lon)
             p_lat = el.get("lat") or el.get("center", {}).get("lat")
             p_lon = el.get("lon") or el.get("center", {}).get("lon")
 
@@ -271,7 +282,6 @@ out center tags 60;
             mapped_category = self._map_osm_category(tags)
             address = self._format_address(tags, name_clean)
 
-            # Extract phone, website, opening_hours if available in OSM
             phone = tags.get("phone") or tags.get("contact:phone")
             website = tags.get("website") or tags.get("contact:website") or tags.get("url")
             opening_hours = tags.get("opening_hours")
@@ -279,7 +289,6 @@ out center tags 60;
             osm_wikidata = tags.get("wikidata")
             osm_image = tags.get("image") or tags.get("wikimedia_commons")
 
-            # Extract descriptive tags
             tags_list = []
             if "cuisine" in tags:
                 tags_list.extend([c.strip().title() for c in tags["cuisine"].split(";") if c.strip()])
@@ -310,8 +319,69 @@ out center tags 60;
                 "tags": tags_list[:4]
             })
 
-        self._set_cache(cache_key, parsed_places)
+        if parsed_places:
+            self._set_cache(cache_key, parsed_places)
         return parsed_places
+
+    async def fetch_entity_by_osm_id(self, el_type: str, el_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Fetch full details for an exact OSM entity (node, way, or relation) by its ID.
+        """
+        el_type_clean = el_type.lower()
+        if el_type_clean not in ["node", "way", "relation"]:
+            el_type_clean = "node"
+
+        cache_key = f"osm_entity:{el_type_clean}:{el_id}"
+        cached = self._get_cache(cache_key)
+        if cached is not None and isinstance(cached, list) and len(cached) > 0:
+            return cached[0]
+
+        query = f"[out:json][timeout:5];{el_type_clean}({el_id});out center tags;"
+
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            pending = [asyncio.create_task(self._query_single_endpoint(client, ep, query)) for ep in OVERPASS_ENDPOINTS]
+            while pending:
+                done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+                for task in done:
+                    try:
+                        elements = task.result()
+                        if elements:
+                            for p in pending:
+                                p.cancel()
+                            el = elements[0]
+                            tags = el.get("tags", {})
+                            name = tags.get("name:en") or tags.get("name") or tags.get("int_name") or f"Place {el_id}"
+                            p_lat = el.get("lat") or el.get("center", {}).get("lat")
+                            p_lon = el.get("lon") or el.get("center", {}).get("lon")
+                            if p_lat is None or p_lon is None:
+                                continue
+
+                            canonical_id = f"osm_{el_type_clean}_{el_id}"
+                            mapped_category = self._map_osm_category(tags)
+                            address = self._format_address(tags, name)
+
+                            res = {
+                                "id": canonical_id,
+                                "provider_id": f"{el_type_clean}/{el_id}",
+                                "name": name,
+                                "category": mapped_category,
+                                "address": address,
+                                "lat": float(p_lat),
+                                "lon": float(p_lon),
+                                "phone": tags.get("phone") or tags.get("contact:phone"),
+                                "website": tags.get("website") or tags.get("contact:website") or tags.get("url"),
+                                "opening_hours": tags.get("opening_hours"),
+                                "osm_wikipedia": tags.get("wikipedia") or tags.get("wikipedia:en"),
+                                "osm_wikidata": tags.get("wikidata"),
+                                "osm_image": tags.get("image") or tags.get("wikimedia_commons"),
+                                "tags": []
+                            }
+                            self._set_cache(cache_key, [res])
+                            return res
+                    except Exception:
+                        pass
+
+        return None
 
 
 # Singleton instance
