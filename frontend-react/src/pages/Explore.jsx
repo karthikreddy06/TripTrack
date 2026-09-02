@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import {
   Search,
@@ -77,8 +77,33 @@ export const Explore = () => {
     performSearch(initialQuery, initialCategory);
   }, [initialQuery, initialCategory, performSearch]);
 
+  useEffect(() => {
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleInputChange = (e) => {
+    const val = e.target.value;
+    setSearchQuery(val);
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+    if (val.trim().length >= 2) {
+      debounceTimerRef.current = setTimeout(() => {
+        setSearchParams({ q: val.trim(), category: activeCategory });
+        performSearch(val.trim(), activeCategory);
+      }, 500);
+    }
+  };
+
   const handleSearchSubmit = (e) => {
     e.preventDefault();
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
     if (!searchQuery.trim()) return;
     setSearchParams({ q: searchQuery.trim(), category: activeCategory });
     performSearch(searchQuery.trim(), activeCategory);
@@ -128,7 +153,7 @@ export const Explore = () => {
             className="explore-search-input"
             placeholder="Search destinations, hotels, restaurants, attractions... (e.g. Hyderabad, Goa, Paris, Delhi)"
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            onChange={handleInputChange}
           />
           <button type="submit" className="btn btn-primary explore-search-btn">
             <span>Explore</span>

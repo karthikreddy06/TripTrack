@@ -26,7 +26,7 @@ const PREFERENCE_OPTIONS = [
 
 export const Profile = () => {
   const { user, updateUser } = useAuth();
-  const { showSuccess, showError } = useToast();
+  const { showSuccess } = useToast();
 
   const [loading, setLoading] = useState(true);
   const [profileData, setProfileData] = useState({

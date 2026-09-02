@@ -4,7 +4,6 @@ import {
   Heart,
   Compass,
   ArrowUpRight,
-  ArrowLeft,
   MapPin,
   Hotel,
   Utensils,
