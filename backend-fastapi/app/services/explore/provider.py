@@ -173,14 +173,14 @@ class ExploreProvider:
             combined_places.append(enriched_exact)
             seen_names.add(enriched_exact["name"].lower())
 
-            # Discover nearby places around this exact place within 10km
-            raw_nearby = await self.overpass.discover_places(lat=lat, lon=lon, category=cat_lower, radius=10000)
+            # Discover nearby places around this exact place within 6km
+            raw_nearby = await self.overpass.discover_places(lat=lat, lon=lon, category=cat_lower, radius=6000)
             if not raw_nearby:
-                raw_nearby = await self.nominatim.search_pois_in_area(geo["city"] or geo["name"], category=cat_lower, limit=20)
+                raw_nearby = await self.nominatim.search_pois_in_area(geo["city"] or geo["name"], category=cat_lower, limit=12)
 
             enrich_tasks = [
                 self._enrich_place(p, geo["city"] or display_name)
-                for p in raw_nearby[:36]
+                for p in raw_nearby[:16]
                 if p["name"].lower() not in seen_names
             ]
             if enrich_tasks:
@@ -198,10 +198,9 @@ class ExploreProvider:
             dest_name = geo["name"]
 
             # Discover real places via Overpass across the destination
-            raw_places = await self.overpass.discover_places(lat=lat, lon=lon, category=cat_lower, radius=12000)
+            raw_places = await self.overpass.discover_places(lat=lat, lon=lon, category=cat_lower, radius=8000)
             if not raw_places or len(raw_places) < 4:
-                # Fast fallback to Nominatim POI search if Overpass had few results
-                poi_fallback = await self.nominatim.search_pois_in_area(dest_name, category=cat_lower, limit=25)
+                poi_fallback = await self.nominatim.search_pois_in_area(dest_name, category=cat_lower, limit=16)
                 existing_ids = {p["id"] for p in raw_places}
                 for p in poi_fallback:
                     if p["id"] not in existing_ids:
@@ -210,7 +209,7 @@ class ExploreProvider:
             # Enrich discovered places concurrently
             enrich_tasks = [
                 self._enrich_place(p, display_name)
-                for p in raw_places[:48]
+                for p in raw_places[:20]
                 if p["name"].lower() not in seen_names
             ]
             if enrich_tasks:
@@ -286,10 +285,10 @@ class ExploreProvider:
         # Use existing places if passed, or discover top places
         enriched = existing_places
         if enriched is None:
-            raw_places = await self.overpass.discover_places(lat=geo["lat"], lon=geo["lon"], category="all", radius=12000)
+            raw_places = await self.overpass.discover_places(lat=geo["lat"], lon=geo["lon"], category="all", radius=8000)
             if not raw_places:
-                raw_places = await self.nominatim.search_pois_in_area(geo["name"], category="all", limit=20)
-            enrich_tasks = [self._enrich_place(p, geo["display_name"]) for p in raw_places[:20]]
+                raw_places = await self.nominatim.search_pois_in_area(geo["name"], category="all", limit=12)
+            enrich_tasks = [self._enrich_place(p, geo["display_name"]) for p in raw_places[:12]]
             if enrich_tasks:
                 enriched_res = await asyncio.gather(*enrich_tasks, return_exceptions=True)
                 enriched = [r for r in enriched_res if isinstance(r, dict)]
@@ -349,7 +348,7 @@ class ExploreProvider:
             overpass_p = await self.overpass.fetch_entity_by_osm_id(el_type, el_id)
             if overpass_p:
                 norm = await self._enrich_place(overpass_p, overpass_p.get("address", ""))
-                raw_nearby = await self.overpass.discover_places(lat=norm["lat"], lon=norm["lon"], category="all", radius=6000)
+                raw_nearby = await self.overpass.discover_places(lat=norm["lat"], lon=norm["lon"], category="all", radius=5000)
                 nearby_tasks = [self._enrich_place(np, norm["address"]) for np in raw_nearby[:4] if np["id"] != place_id]
                 nearby_res = await asyncio.gather(*nearby_tasks, return_exceptions=True) if nearby_tasks else []
                 nearby = [r for r in nearby_res if isinstance(r, dict)]
@@ -375,7 +374,7 @@ class ExploreProvider:
                     "tags": []
                 }
                 norm = await self._enrich_place(raw_p, geo["display_name"])
-                raw_nearby = await self.overpass.discover_places(lat=geo["lat"], lon=geo["lon"], category="all", radius=6000)
+                raw_nearby = await self.overpass.discover_places(lat=geo["lat"], lon=geo["lon"], category="all", radius=5000)
                 nearby_tasks = [self._enrich_place(np, geo["display_name"]) for np in raw_nearby[:4] if np["id"] != place_id]
                 nearby_res = await asyncio.gather(*nearby_tasks, return_exceptions=True) if nearby_tasks else []
                 nearby = [r for r in nearby_res if isinstance(r, dict)]
@@ -402,7 +401,7 @@ class ExploreProvider:
                 "tags": []
             }
             norm = await self._enrich_place(raw_p, geo["display_name"])
-            raw_nearby = await self.overpass.discover_places(lat=geo["lat"], lon=geo["lon"], category="all", radius=6000)
+            raw_nearby = await self.overpass.discover_places(lat=geo["lat"], lon=geo["lon"], category="all", radius=5000)
             nearby_tasks = [self._enrich_place(np, geo["display_name"]) for np in raw_nearby[:4] if np["id"] != norm["id"]]
             nearby_res = await asyncio.gather(*nearby_tasks, return_exceptions=True) if nearby_tasks else []
             nearby = [r for r in nearby_res if isinstance(r, dict)]

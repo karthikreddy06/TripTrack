@@ -3,7 +3,7 @@ import time
 from typing import Dict, List, Optional, Any
 import httpx
 
-# Public Overpass API mirrors ordered by reliability
+# Public Overpass API mirrors ordered by speed and reliability
 OVERPASS_ENDPOINTS = [
     "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
     "https://lz4.overpass-api.de/api/interpreter",
@@ -70,7 +70,7 @@ class OverpassService:
             "User-Agent": "TravelTrack-Explore/4.0 (https://triptrack-frontend.onrender.com; info@triptrack.app)",
             "Accept": "application/json",
         }
-        self.timeout = httpx.Timeout(5.0, connect=2.0)
+        self.timeout = httpx.Timeout(3.5, connect=1.5)
         self._cache: Dict[str, tuple[float, List[Dict[str, Any]]]] = {}
         self.cache_ttl = 86400  # 24 hours
 
@@ -143,18 +143,18 @@ class OverpassService:
 
         if cat_lower == "hotels":
             body = f"""
-  node["tourism"~"hotel|hostel|guest_house|motel|resort"](around:{radius},{lat},{lon});
-  way["tourism"~"hotel|hostel|guest_house|motel|resort"](around:{radius},{lat},{lon});
+  node["tourism"~"hotel|hostel|guest_house|resort"](around:{radius},{lat},{lon});
+  way["tourism"~"hotel|hostel|guest_house|resort"](around:{radius},{lat},{lon});
 """
         elif cat_lower in ["restaurants", "dining"]:
             body = f"""
-  node["amenity"~"restaurant|fast_food|food_court|pub"](around:{radius},{lat},{lon});
-  way["amenity"~"restaurant|fast_food|food_court|pub"](around:{radius},{lat},{lon});
+  node["amenity"~"restaurant|fast_food|pub"](around:{radius},{lat},{lon});
+  way["amenity"~"restaurant|fast_food|pub"](around:{radius},{lat},{lon});
 """
         elif cat_lower == "cafes":
             body = f"""
   node["amenity"="cafe"](around:{radius},{lat},{lon});
-  node["shop"~"bakery|coffee|tea"](around:{radius},{lat},{lon});
+  node["shop"~"bakery|coffee"](around:{radius},{lat},{lon});
 """
         elif cat_lower == "museums":
             body = f"""
@@ -175,7 +175,7 @@ class OverpassService:
             body = f"""
   node["tourism"~"theme_park|zoo|aquarium|water_park"](around:{radius},{lat},{lon});
   way["tourism"~"theme_park|zoo|aquarium|water_park"](around:{radius},{lat},{lon});
-  node["leisure"~"water_park|sports_centre|ice_rink"](around:{radius},{lat},{lon});
+  node["leisure"~"water_park|sports_centre"](around:{radius},{lat},{lon});
 """
         elif cat_lower == "attractions":
             body = f"""
@@ -186,19 +186,19 @@ class OverpassService:
 """
         else:  # "all"
             body = f"""
-  node["tourism"~"attraction|museum|gallery|theme_park|zoo|aquarium|viewpoint|hotel|hostel|resort"](around:{radius},{lat},{lon});
-  way["tourism"~"attraction|museum|gallery|theme_park|zoo|aquarium|viewpoint|hotel|hostel|resort"](around:{radius},{lat},{lon});
-  node["historic"~"monument|memorial|castle|fort|ruins|palace|heritage"](around:{radius},{lat},{lon});
-  way["historic"~"monument|memorial|castle|fort|ruins|palace|heritage"](around:{radius},{lat},{lon});
+  node["tourism"~"attraction|museum|viewpoint|hotel|resort"](around:{radius},{lat},{lon});
+  way["tourism"~"attraction|museum|viewpoint|hotel|resort"](around:{radius},{lat},{lon});
+  node["historic"~"monument|memorial|castle|fort|palace|heritage"](around:{radius},{lat},{lon});
+  way["historic"~"monument|memorial|castle|fort|palace|heritage"](around:{radius},{lat},{lon});
   node["amenity"~"restaurant|cafe"](around:{radius},{lat},{lon});
   node["leisure"~"park|garden"](around:{radius},{lat},{lon});
 """
 
-        query = f"""[out:json][timeout:5];
+        query = f"""[out:json][timeout:3];
 (
 {body}
 );
-out center tags 50;
+out center tags 30;
 """
         return query
 
@@ -217,11 +217,11 @@ out center tags 50;
         lat: float,
         lon: float,
         category: str = "all",
-        radius: int = 12000
+        radius: int = 6000
     ) -> List[Dict[str, Any]]:
         """
         Query Overpass API around given coordinates and return deduplicated, normalized place items.
-        Queries mirrors with fast parallel fallbacks and immediate cancellation of remaining tasks.
+        Queries live mirrors sequentially with fast failover.
         """
         cache_key = f"overpass:{round(lat, 3)}:{round(lon, 3)}:{category.lower()}"
         cached = self._get_cache(cache_key)
@@ -232,22 +232,14 @@ out center tags 50;
         elements = []
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            pending = [asyncio.create_task(self._query_single_endpoint(client, ep, query)) for ep in OVERPASS_ENDPOINTS]
-            while pending:
-                done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
-                for task in done:
-                    try:
-                        res_elements = task.result()
-                        if res_elements:
-                            elements = res_elements
-                            for p in pending:
-                                p.cancel()
-                            pending = []
-                            break
-                    except Exception:
-                        pass
-                if elements:
-                    break
+            for ep in OVERPASS_ENDPOINTS:
+                try:
+                    res_elements = await self._query_single_endpoint(client, ep, query)
+                    if res_elements:
+                        elements = res_elements
+                        break
+                except Exception:
+                    continue
 
         # Parse, filter, and deduplicate
         seen_names = set()
@@ -336,50 +328,45 @@ out center tags 50;
         if cached is not None and isinstance(cached, list) and len(cached) > 0:
             return cached[0]
 
-        query = f"[out:json][timeout:5];{el_type_clean}({el_id});out center tags;"
+        query = f"[out:json][timeout:3];{el_type_clean}({el_id});out center tags;"
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            pending = [asyncio.create_task(self._query_single_endpoint(client, ep, query)) for ep in OVERPASS_ENDPOINTS]
-            while pending:
-                done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
-                for task in done:
-                    try:
-                        elements = task.result()
-                        if elements:
-                            for p in pending:
-                                p.cancel()
-                            el = elements[0]
-                            tags = el.get("tags", {})
-                            name = tags.get("name:en") or tags.get("name") or tags.get("int_name") or f"Place {el_id}"
-                            p_lat = el.get("lat") or el.get("center", {}).get("lat")
-                            p_lon = el.get("lon") or el.get("center", {}).get("lon")
-                            if p_lat is None or p_lon is None:
-                                continue
+            for ep in OVERPASS_ENDPOINTS:
+                try:
+                    elements = await self._query_single_endpoint(client, ep, query)
+                    if elements:
+                        el = elements[0]
+                        tags = el.get("tags", {})
+                        name = tags.get("name:en") or tags.get("name") or tags.get("int_name") or f"Place {el_id}"
+                        p_lat = el.get("lat") or el.get("center", {}).get("lat")
+                        p_lon = el.get("lon") or el.get("center", {}).get("lon")
+                        if p_lat is None or p_lon is None:
+                            continue
 
-                            canonical_id = f"osm_{el_type_clean}_{el_id}"
-                            mapped_category = self._map_osm_category(tags)
-                            address = self._format_address(tags, name)
+                        canonical_id = f"osm_{el_type_clean}_{el_id}"
+                        mapped_category = self._map_osm_category(tags)
+                        address = self._format_address(tags, name)
 
-                            res = {
-                                "id": canonical_id,
-                                "provider_id": f"{el_type_clean}/{el_id}",
-                                "name": name,
-                                "category": mapped_category,
-                                "address": address,
-                                "lat": float(p_lat),
-                                "lon": float(p_lon),
-                                "phone": tags.get("phone") or tags.get("contact:phone"),
-                                "website": tags.get("website") or tags.get("contact:website") or tags.get("url"),
-                                "opening_hours": tags.get("opening_hours"),
-                                "osm_wikipedia": tags.get("wikipedia") or tags.get("wikipedia:en"),
-                                "osm_wikidata": tags.get("wikidata"),
-                                "osm_image": tags.get("image") or tags.get("wikimedia_commons"),
-                                "tags": []
-                            }
-                            self._set_cache(cache_key, [res])
-                            return res
-                    except Exception:
-                        pass
+                        res = {
+                            "id": canonical_id,
+                            "provider_id": f"{el_type_clean}/{el_id}",
+                            "name": name,
+                            "category": mapped_category,
+                            "address": address,
+                            "lat": float(p_lat),
+                            "lon": float(p_lon),
+                            "phone": tags.get("phone") or tags.get("contact:phone"),
+                            "website": tags.get("website") or tags.get("contact:website") or tags.get("url"),
+                            "opening_hours": tags.get("opening_hours"),
+                            "osm_wikipedia": tags.get("wikipedia") or tags.get("wikipedia:en"),
+                            "osm_wikidata": tags.get("wikidata"),
+                            "osm_image": tags.get("image") or tags.get("wikimedia_commons"),
+                            "tags": []
+                        }
+                        self._set_cache(cache_key, [res])
+                        return res
+                except Exception:
+                    continue
 
         return None
 
