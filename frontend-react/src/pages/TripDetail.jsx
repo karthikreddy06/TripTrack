@@ -19,7 +19,6 @@ import {
   Lightbulb,
   Check
 } from 'lucide-react';
-import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { tripsAPI, itineraryAPI, expensesAPI, aiAPI, extractErrorMessage } from '../services/api';
 import { StatusBadge } from '../components/StatusBadge';

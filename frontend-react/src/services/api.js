@@ -294,6 +294,85 @@ export const aiAPI = {
   },
 };
 
+// Explore & Travel Discovery API
+export const exploreAPI = {
+  getFeatured: async () => {
+    const response = await apiClient.get('/explore/featured');
+    return response.data;
+  },
+
+  search: async (query, category = 'all', limit = 30) => {
+    const response = await apiClient.get('/explore/search', {
+      params: { q: query, category, limit },
+    });
+    return response.data;
+  },
+
+  getDestination: async (destination) => {
+    const response = await apiClient.get(`/explore/destinations/${encodeURIComponent(destination)}`);
+    return response.data;
+  },
+
+  getPlaceDetails: async (placeId) => {
+    const response = await apiClient.get(`/explore/places/${encodeURIComponent(placeId)}`);
+    return response.data;
+  },
+
+  getHotels: async (query, limit = 30) => {
+    const response = await apiClient.get('/explore/hotels', {
+      params: { q: query, limit },
+    });
+    return response.data;
+  },
+
+  getRestaurants: async (query, limit = 30) => {
+    const response = await apiClient.get('/explore/restaurants', {
+      params: { q: query, limit },
+    });
+    return response.data;
+  },
+
+  getAttractions: async (query, limit = 30) => {
+    const response = await apiClient.get('/explore/attractions', {
+      params: { q: query, limit },
+    });
+    return response.data;
+  },
+};
+
+// Wishlist API services
+export const wishlistAPI = {
+  getWishlist: async () => {
+    const response = await apiClient.get('/wishlist/');
+    return response.data;
+  },
+
+  addToWishlist: async (itemData) => {
+    const payload = {
+      place_id: itemData.place_id,
+      name: itemData.name,
+      category: itemData.category || 'destination',
+      location: itemData.location,
+      image_url: itemData.image_url,
+      rating: itemData.rating !== undefined ? itemData.rating : null,
+      description: itemData.description,
+      metadata: itemData.metadata || {},
+    };
+    const response = await apiClient.post('/wishlist/', payload);
+    return response.data;
+  },
+
+  checkSaved: async (placeId) => {
+    const response = await apiClient.get(`/wishlist/check/${encodeURIComponent(placeId)}`);
+    return response.data;
+  },
+
+  removeFromWishlist: async (wishlistId) => {
+    const response = await apiClient.delete(`/wishlist/${wishlistId}`);
+    return response.data;
+  },
+};
+
 // System Health API
 export const healthAPI = {
   checkHealth: async () => {

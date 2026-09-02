@@ -12,6 +12,10 @@ import { CreateTrip } from './pages/CreateTrip';
 import { EditTrip } from './pages/EditTrip';
 import { AIPlanner } from './pages/AIPlanner';
 import { Profile } from './pages/Profile';
+import { Explore } from './pages/Explore';
+import { DestinationDetail } from './pages/DestinationDetail';
+import { PlaceDetail } from './pages/PlaceDetail';
+import { Wishlist } from './pages/Wishlist';
 import { NotFound } from './pages/NotFound';
 import './styles/components.css';
 
@@ -61,6 +65,11 @@ export default function App() {
             }
           />
 
+          {/* Explore routes (Accessible to both authenticated and browsing guests) */}
+          <Route path="/explore" element={<Explore />} />
+          <Route path="/explore/:destination" element={<DestinationDetail />} />
+          <Route path="/explore/place/:placeId" element={<PlaceDetail />} />
+
           {/* Protected app routes */}
           <Route
             path="/dashboard"
@@ -107,6 +116,14 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <EditTrip />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/wishlist"
+            element={
+              <ProtectedRoute>
+                <Wishlist />
               </ProtectedRoute>
             }
           />

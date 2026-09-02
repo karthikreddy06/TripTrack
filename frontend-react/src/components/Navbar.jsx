@@ -1,6 +1,17 @@
 import { useState } from 'react';
 import { NavLink, Link, useNavigate } from 'react-router-dom';
-import { LogOut, Menu, X, ArrowUpRight } from 'lucide-react';
+import {
+  Compass,
+  Heart,
+  Sparkles,
+  Luggage,
+  Home,
+  Plus,
+  LogOut,
+  Menu,
+  X,
+  ArrowUpRight
+} from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 export const Navbar = () => {
@@ -14,7 +25,7 @@ export const Navbar = () => {
   };
 
   const getInitials = (name) => {
-    if (!name) return 'KR';
+    if (!name) return 'TR';
     return name
       .split(' ')
       .filter(Boolean)
@@ -30,7 +41,7 @@ export const Navbar = () => {
         <Link to="/" className="brand-logo">
           <span className="brand-dot" />
           <span>TravelTrack</span>
-          <span className="brand-sub"> / trips</span>
+          <span className="brand-sub"> / explore</span>
         </Link>
 
         {isAuthenticated && (
@@ -40,7 +51,17 @@ export const Navbar = () => {
               className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
               onClick={() => setMobileMenuOpen(false)}
             >
-              Dashboard
+              <Home size={14} className="nav-icon" />
+              <span>Home</span>
+            </NavLink>
+
+            <NavLink
+              to="/explore"
+              className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
+              onClick={() => setMobileMenuOpen(false)}
+            >
+              <Compass size={14} className="nav-icon" />
+              <span>Explore</span>
             </NavLink>
 
             <NavLink
@@ -49,7 +70,17 @@ export const Navbar = () => {
               className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
               onClick={() => setMobileMenuOpen(false)}
             >
-              My Trips
+              <Luggage size={14} className="nav-icon" />
+              <span>Trips</span>
+            </NavLink>
+
+            <NavLink
+              to="/wishlist"
+              className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
+              onClick={() => setMobileMenuOpen(false)}
+            >
+              <Heart size={14} className="nav-icon" />
+              <span>Wishlist</span>
             </NavLink>
 
             <NavLink
@@ -57,15 +88,8 @@ export const Navbar = () => {
               className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
               onClick={() => setMobileMenuOpen(false)}
             >
-              AI Planner
-            </NavLink>
-
-            <NavLink
-              to="/trips/new"
-              className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
-              onClick={() => setMobileMenuOpen(false)}
-            >
-              Create Trip
+              <Sparkles size={14} className="nav-icon" />
+              <span>AI Assistant</span>
             </NavLink>
 
             <NavLink
@@ -82,6 +106,15 @@ export const Navbar = () => {
           {isAuthenticated ? (
             <>
               <Link
+                to="/trips/new"
+                className="btn btn-primary btn-sm desktop-create-btn"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', padding: '0.35rem 0.75rem' }}
+              >
+                <Plus size={13} />
+                <span>New Trip</span>
+              </Link>
+
+              <Link
                 to="/profile"
                 className="user-pill"
                 title={`Logged in as ${user?.email} • View Profile`}
@@ -89,7 +122,7 @@ export const Navbar = () => {
                 <div className="user-avatar">
                   {getInitials(user?.name)}
                 </div>
-                <span>{user?.name || 'Traveler'}</span>
+                <span>{user?.name ? user.name.split(' ')[0] : 'Traveler'}</span>
               </Link>
 
               <button
@@ -113,6 +146,10 @@ export const Navbar = () => {
             </>
           ) : (
             <div style={{ display: 'flex', gap: '0.6rem' }}>
+              <Link to="/explore" className="btn btn-secondary btn-sm">
+                <Compass size={13} />
+                <span>Explore</span>
+              </Link>
               <Link to="/login" className="btn btn-secondary btn-sm">
                 Sign In
               </Link>

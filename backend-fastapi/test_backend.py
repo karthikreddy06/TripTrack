@@ -278,8 +278,78 @@ def run_tests():
     print("Invalid token response:", res.status_code)
     assert res.status_code == 401, f"Expected 401 Unauthorized, got {res.status_code}"
 
-    # 13. Cascade Deletion Check
-    print("\n[TEST 13] Testing Cascade Cleanup on Trip Delete...")
+    # 14. Explore & Travel Discovery
+    print("\n[TEST 14] Testing Explore Discovery Endpoints...")
+    res = test_client.get("/explore/featured")
+    print("Explore featured response:", res.status_code, "Count:", len(res.json()))
+    assert res.status_code == 200
+    assert len(res.json()) >= 1
+
+    # Search Goa
+    res = test_client.get("/explore/search?q=goa&category=all")
+    print("Explore search response:", res.status_code, "Results:", res.json().get("total_results"))
+    assert res.status_code == 200
+    assert res.json()["total_results"] > 0
+
+    # Destination details
+    res = test_client.get("/explore/destinations/goa")
+    print("Destination details response:", res.status_code, res.json().get("destination"))
+    assert res.status_code == 200
+    assert res.json()["destination"] == "Goa"
+
+    # Place details
+    res = test_client.get("/explore/places/goa-baga-beach")
+    print("Place details response:", res.status_code, res.json()["place"]["name"])
+    assert res.status_code == 200
+    assert res.json()["place"]["name"] == "Baga Beach"
+
+    # 15. Wishlist CRUD
+    print("\n[TEST 15] Testing Wishlist Operations...")
+    wishlist_item_1 = {
+        "place_id": "goa-baga-beach",
+        "name": "Baga Beach",
+        "category": "attraction",
+        "location": "North Goa, Goa",
+        "image_url": "https://images.unsplash.com/photo-1512343879784-a960bf40e7f2?w=800",
+        "rating": 4.5,
+        "description": "Famous beach destination with water sports and shacks.",
+        "metadata": {"lat": 15.5553, "lon": 73.7517}
+    }
+    res = test_client.post("/wishlist/", headers=auth_headers, json=wishlist_item_1)
+    print("Add to wishlist response:", res.status_code, res.json().get("name"))
+    assert res.status_code in [200, 201]
+    wishlist_id = res.json()["_id"]
+
+    # Check place in wishlist
+    res = test_client.get("/wishlist/check/goa-baga-beach", headers=auth_headers)
+    print("Wishlist check response:", res.status_code, res.json())
+    assert res.status_code == 200
+    assert res.json()["is_saved"] is True
+    assert res.json()["wishlist_id"] == wishlist_id
+
+    # 16. Wishlist Duplicate Prevention & Deletion
+    print("\n[TEST 16] Testing Wishlist Duplicate Prevention & Deletion...")
+    # Attempt duplicate addition
+    res = test_client.post("/wishlist/", headers=auth_headers, json=wishlist_item_1)
+    assert res.status_code in [200, 201]
+
+    # Verify count is still 1
+    res = test_client.get("/wishlist/", headers=auth_headers)
+    print("Get wishlist response:", res.status_code, "Count:", len(res.json()))
+    assert res.status_code == 200
+    assert len(res.json()) == 1
+
+    # Delete wishlist item
+    res = test_client.delete(f"/wishlist/{wishlist_id}", headers=auth_headers)
+    print("Delete wishlist item response:", res.status_code, res.json())
+    assert res.status_code == 200
+
+    # Verify check returns false now
+    res = test_client.get("/wishlist/check/goa-baga-beach", headers=auth_headers)
+    assert res.json()["is_saved"] is False
+
+    # 17. Cascade Deletion Check
+    print("\n[TEST 17] Testing Cascade Cleanup on Trip Delete...")
     res = test_client.delete(f"/trips/{trip_id}", headers=auth_headers)
     print("Delete trip response:", res.status_code, res.json())
     assert res.status_code == 200
@@ -297,7 +367,7 @@ def run_tests():
     print("Cleaned up test user.")
 
     print("\n==================================================")
-    print("ALL 13 BACKEND TESTS PASSED SUCCESSFULLY!")
+    print("ALL 17 BACKEND TESTS PASSED SUCCESSFULLY!")
     print("==================================================")
 
 if __name__ == "__main__":

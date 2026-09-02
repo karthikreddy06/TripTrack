@@ -9,6 +9,8 @@ from app.routes.trips import router as trips_router
 from app.routes.itinerary import router as itinerary_router
 from app.routes.expenses import router as expenses_router
 from app.routes.ai import router as ai_router
+from app.routes.explore import router as explore_router
+from app.routes.wishlist import router as wishlist_router
 from app.database.mongodb import init_db_indexes
 
 # Initialize indexes on startup safely
@@ -65,12 +67,16 @@ app.include_router(trips_router)
 app.include_router(itinerary_router)
 app.include_router(expenses_router)
 app.include_router(ai_router)
+app.include_router(explore_router)
+app.include_router(wishlist_router)
 
 app.include_router(users_router, prefix="/api")
 app.include_router(trips_router, prefix="/api")
 app.include_router(itinerary_router, prefix="/api")
 app.include_router(expenses_router, prefix="/api")
 app.include_router(ai_router, prefix="/api")
+app.include_router(explore_router, prefix="/api")
+app.include_router(wishlist_router, prefix="/api")
 
 
 @app.get("/api", tags=["General"])
