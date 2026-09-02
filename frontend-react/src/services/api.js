@@ -313,14 +313,26 @@ export const aiAPI = {
 
 // Explore & Travel Discovery API
 export const exploreAPI = {
+  getSuggestions: async (query, limit = 6) => {
+    const response = await apiClient.get('/explore/suggestions', {
+      params: { q: query, limit },
+    });
+    return response.data;
+  },
+
   getFeatured: async () => {
     const response = await apiClient.get('/explore/featured');
     return response.data;
   },
 
-  search: async (query, category = 'all', page = 1, limit = 24) => {
+  search: async (query, category = 'all', page = 1, limit = 24, lat = null, lon = null) => {
+    const params = { q: query, category, page, limit };
+    if (lat !== null && lat !== undefined && lon !== null && lon !== undefined) {
+      params.lat = lat;
+      params.lon = lon;
+    }
     const response = await apiClient.get('/explore/search', {
-      params: { q: query, category, page, limit },
+      params,
     });
     return response.data;
   },

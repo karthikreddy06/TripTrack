@@ -1346,6 +1346,14 @@
   margin-bottom: 2rem;
 }
 
+/* Explore Search Wrapper & Autocomplete Dropdown */
+.explore-search-wrapper {
+  position: relative;
+  max-width: 760px;
+  margin-bottom: 1.75rem;
+  z-index: 40;
+}
+
 .explore-search-bar {
   display: flex;
   align-items: center;
@@ -1355,9 +1363,95 @@
   border-radius: var(--radius-full);
   padding: 0.4rem 0.5rem 0.4rem 1.25rem;
   box-shadow: var(--shadow-lift);
-  max-width: 760px;
-  margin-bottom: 1.75rem;
+  margin-bottom: 0;
   transition: all var(--transition-fast);
+}
+
+.explore-suggestions-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  background: var(--surface-card, #FFFFFF);
+  border: 1px solid var(--border-hover, #dcd9cf);
+  border-radius: var(--radius-md, 12px);
+  box-shadow: 0 12px 32px rgba(27, 54, 39, 0.14), 0 2px 6px rgba(0, 0, 0, 0.04);
+  overflow: hidden;
+  z-index: 50;
+  animation: fadeIn 0.15s ease;
+}
+
+.explore-suggestion-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1.15rem;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border-light, #f0ede6);
+  transition: all 0.12s ease;
+  background: transparent;
+  width: 100%;
+  text-align: left;
+  border-left: 3px solid transparent;
+}
+
+.explore-suggestion-item:last-child {
+  border-bottom: none;
+}
+
+.explore-suggestion-item:hover,
+.explore-suggestion-item.active {
+  background: var(--surface-cream, #f5f4ef);
+  border-left-color: var(--primary-green, #2f523b);
+}
+
+.explore-suggestion-left {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.explore-suggestion-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: rgba(47, 82, 59, 0.08);
+  color: var(--primary-green, #2f523b);
+  flex-shrink: 0;
+}
+
+.explore-suggestion-name {
+  font-weight: 600;
+  font-size: 0.92rem;
+  color: var(--text-primary, #1a2e22);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.explore-suggestion-sub {
+  font-size: 0.78rem;
+  color: var(--text-secondary, #5a7363);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.explore-suggestion-badge {
+  font-size: 0.65rem;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(47, 82, 59, 0.06);
+  color: var(--primary-green, #2f523b);
+  flex-shrink: 0;
 }
 
 .explore-search-bar:focus-within {

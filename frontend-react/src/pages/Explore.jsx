@@ -18,7 +18,9 @@ import {
   ChevronDown,
   Sparkles,
   Calendar,
-  DollarSign
+  DollarSign,
+  Building2,
+  Navigation
 } from 'lucide-react';
 import { exploreAPI, extractErrorMessage } from '../services/api';
 import { PlaceCard } from '../components/PlaceCard';
@@ -40,11 +42,13 @@ const CATEGORIES = [
 
 const FEATURED_SHORTCUTS = [
   { name: 'Hyderabad', label: 'Hyderabad, India', code: 'HYD' },
-  { name: 'Goa', label: 'Goa, India', code: 'GOA' },
+  { name: 'Kolkata', label: 'Kolkata, India', code: 'CCU' },
   { name: 'Bengaluru', label: 'Bengaluru, India', code: 'BLR' },
+  { name: 'Goa', label: 'Goa, India', code: 'GOA' },
   { name: 'Delhi', label: 'Delhi, India', code: 'DEL' },
   { name: 'Mumbai', label: 'Mumbai, India', code: 'BOM' },
   { name: 'Paris', label: 'Paris, France', code: 'PAR' },
+  { name: 'Tokyo', label: 'Tokyo, Japan', code: 'TYO' },
 ];
 
 export const Explore = () => {
@@ -67,10 +71,17 @@ export const Explore = () => {
   const [showMap, setShowMap] = useState(false);
   const [selectedPlaceId, setSelectedPlaceId] = useState(null);
 
+  // Autocomplete Suggestions State
+  const [suggestions, setSuggestions] = useState([]);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const [selectedIndex, setSelectedIndex] = useState(-1);
+
   const [modalPlace, setModalPlace] = useState(null);
   const debounceTimerRef = useRef(null);
+  const searchWrapperRef = useRef(null);
 
-  const performSearch = useCallback(async (q, cat, page = 1, append = false) => {
+  const performSearch = useCallback(async (q, cat, page = 1, append = false, lat = null, lon = null) => {
     if (!q.trim()) return;
     try {
       if (append) {
@@ -78,9 +89,14 @@ export const Explore = () => {
       } else {
         setLoading(true);
         setError(null);
+        // Clear stale destination and places when switching to a new search query
+        if (page === 1) {
+          setSearchResults([]);
+          setDestinationInfo(null);
+        }
       }
 
-      const data = await exploreAPI.search(q.trim(), cat, page, 24);
+      const data = await exploreAPI.search(q.trim(), cat, page, 24, lat, lon);
       const incoming = data.places || data.results || [];
 
       if (append) {
@@ -105,6 +121,7 @@ export const Explore = () => {
       if (!append) {
         setError(extractErrorMessage(err));
         setSearchResults([]);
+        setDestinationInfo(null);
       }
     } finally {
       setLoading(false);
@@ -112,38 +129,104 @@ export const Explore = () => {
     }
   }, []);
 
+  // Fetch initial search query on mount or URL change
   useEffect(() => {
     performSearch(initialQuery, initialCategory, 1, false);
   }, [initialQuery, initialCategory, performSearch]);
 
+  // Click outside to close autocomplete dropdown
   useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (searchWrapperRef.current && !searchWrapperRef.current.contains(e.target)) {
+        setShowDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
     return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current);
       }
     };
   }, []);
 
+  // Fetch dynamic suggestions on input change with 250ms debounce
   const handleInputChange = (e) => {
     const val = e.target.value;
     setSearchQuery(val);
+    setSelectedIndex(-1);
+
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
     }
+
     if (val.trim().length >= 2) {
-      debounceTimerRef.current = setTimeout(() => {
-        setSearchParams({ q: val.trim(), category: activeCategory });
-        performSearch(val.trim(), activeCategory, 1, false);
-      }, 500);
+      setSuggestionsLoading(true);
+      setShowDropdown(true);
+
+      debounceTimerRef.current = setTimeout(async () => {
+        try {
+          const sugs = await exploreAPI.getSuggestions(val.trim(), 6);
+          setSuggestions(sugs || []);
+        } catch {
+          setSuggestions([]);
+        } finally {
+          setSuggestionsLoading(false);
+        }
+      }, 250);
+    } else {
+      setSuggestions([]);
+      setShowDropdown(false);
+      setSuggestionsLoading(false);
     }
   };
 
+  // Keyboard navigation within suggestions dropdown
+  const handleKeyDown = (e) => {
+    if (!showDropdown || suggestions.length === 0) return;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setSelectedIndex((prev) => (prev < suggestions.length - 1 ? prev + 1 : 0));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setSelectedIndex((prev) => (prev > 0 ? prev - 1 : suggestions.length - 1));
+    } else if (e.key === 'Enter') {
+      if (selectedIndex >= 0 && selectedIndex < suggestions.length) {
+        e.preventDefault();
+        handleSelectSuggestion(suggestions[selectedIndex]);
+      }
+    } else if (e.key === 'Escape') {
+      setShowDropdown(false);
+    }
+  };
+
+  // Handle suggestion click / selection
+  const handleSelectSuggestion = (sug) => {
+    if (!sug) return;
+    const targetName = sug.name;
+    setSearchQuery(targetName);
+    setShowDropdown(false);
+    setSuggestions([]);
+    setSearchParams({ q: targetName, category: activeCategory });
+    performSearch(targetName, activeCategory, 1, false, sug.lat, sug.lon);
+  };
+
+  // Submit search form
   const handleSearchSubmit = (e) => {
     e.preventDefault();
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
     }
+    setShowDropdown(false);
     if (!searchQuery.trim()) return;
+
+    // If an item is selected by keyboard, use it
+    if (selectedIndex >= 0 && selectedIndex < suggestions.length) {
+      handleSelectSuggestion(suggestions[selectedIndex]);
+      return;
+    }
+
     setSearchParams({ q: searchQuery.trim(), category: activeCategory });
     performSearch(searchQuery.trim(), activeCategory, 1, false);
   };
@@ -156,6 +239,7 @@ export const Explore = () => {
 
   const handleShortcutClick = (destName) => {
     setSearchQuery(destName);
+    setShowDropdown(false);
     setSearchParams({ q: destName, category: 'all' });
     setActiveCategory('all');
     performSearch(destName, 'all', 1, false);
@@ -187,28 +271,75 @@ export const Explore = () => {
           <em>want to wander?</em>
         </h1>
         <p className="explore-hero-subtitle">
-          Search authentic attractions, historic sights, local dining, cafes, and verified stays powered by OpenStreetMap &amp; Overpass.
+          Search authentic attractions, historic sights, local dining, cafes, and verified stays worldwide powered dynamically by OpenStreetMap &amp; Overpass.
         </p>
 
-        {/* Search Bar */}
-        <form onSubmit={handleSearchSubmit} className="explore-search-bar">
-          <Search size={18} className="search-bar-icon" />
-          <input
-            type="text"
-            className="explore-search-input"
-            placeholder="Search any destination worldwide... (e.g. Hyderabad, Goa, Paris, Bengaluru, Mumbai, London)"
-            value={searchQuery}
-            onChange={handleInputChange}
-          />
-          <button type="submit" className="btn btn-primary explore-search-btn">
-            <span>Explore</span>
-            <ArrowUpRight size={14} />
-          </button>
-        </form>
+        {/* Autocomplete Search Bar */}
+        <div className="explore-search-wrapper" ref={searchWrapperRef}>
+          <form onSubmit={handleSearchSubmit} className="explore-search-bar">
+            <Search size={18} className="search-bar-icon" />
+            <input
+              type="text"
+              className="explore-search-input"
+              placeholder="Search any destination worldwide... (e.g. Kolkata, Hyderabad, Paris, Tokyo, Eiffel Tower)"
+              value={searchQuery}
+              onChange={handleInputChange}
+              onKeyDown={handleKeyDown}
+              onFocus={() => {
+                if (suggestions.length > 0) setShowDropdown(true);
+              }}
+              autoComplete="off"
+            />
+            {suggestionsLoading && (
+              <div className="spinner-sm" style={{ marginRight: '0.5rem', width: '14px', height: '14px' }} />
+            )}
+            <button type="submit" className="btn btn-primary explore-search-btn">
+              <span>Explore</span>
+              <ArrowUpRight size={14} />
+            </button>
+          </form>
 
-        {/* Clean Editorial Destination Shortcut Chips (No photo dependency) */}
-        <div className="featured-shortcuts-row" style={{ marginTop: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-          <span className="shortcuts-label" style={{ fontSize: '0.72rem', fontFamily: 'var(--font-mono)', letterSpacing: '0.06em', color: 'var(--text-secondary)' }}>
+          {/* Autocomplete Suggestions Dropdown */}
+          {showDropdown && suggestions.length > 0 && (
+            <div className="explore-suggestions-dropdown" role="listbox">
+              {suggestions.map((sug, idx) => {
+                const isSelected = idx === selectedIndex;
+                const isDest = sug.is_destination;
+                const IconComponent = isDest ? Building2 : (sug.category === 'hotel' ? Hotel : (sug.category === 'restaurant' || sug.category === 'cafe' ? Utensils : Landmark));
+
+                return (
+                  <div
+                    key={`${sug.id || sug.name}-${idx}`}
+                    className={`explore-suggestion-item ${isSelected ? 'active' : ''}`}
+                    onClick={() => handleSelectSuggestion(sug)}
+                    onMouseEnter={() => setSelectedIndex(idx)}
+                    role="option"
+                    aria-selected={isSelected}
+                  >
+                    <div className="explore-suggestion-left">
+                      <div className="explore-suggestion-icon">
+                        <IconComponent size={16} />
+                      </div>
+                      <div style={{ minWidth: 0 }}>
+                        <div className="explore-suggestion-name">{sug.name}</div>
+                        {sug.subtitle && (
+                          <div className="explore-suggestion-sub">{sug.subtitle}</div>
+                        )}
+                      </div>
+                    </div>
+                    <span className="explore-suggestion-badge">
+                      {isDest ? 'Destination' : (sug.category || 'Place')}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Clean Editorial Destination Shortcut Chips */}
+        <div className="featured-shortcuts-row">
+          <span className="shortcuts-label">
             POPULAR DESTINATIONS:
           </span>
           {FEATURED_SHORTCUTS.map((sc) => {
@@ -290,7 +421,7 @@ export const Explore = () => {
 
       {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
 
-      {/* Destination Editorial Overview Banner (Compact, designed vector graphic) */}
+      {/* Destination Editorial Overview Banner */}
       {destinationInfo && (
         <div
           className="card destination-overview-banner"
@@ -449,6 +580,7 @@ export const Explore = () => {
                     fontFamily: 'var(--font-mono)',
                   }}
                 >
+                  <Navigation size={11} />
                   <span>OSM Verified</span>
                 </div>
               </div>
@@ -491,14 +623,16 @@ export const Explore = () => {
         {loading ? (
           <div className="loading-state card" style={{ padding: '3.5rem 1.5rem', textAlign: 'center' }}>
             <div className="spinner" style={{ margin: '0 auto 1rem' }} />
-            <p style={{ color: 'var(--text-secondary)' }}>Discovering real places with OpenStreetMap...</p>
+            <p style={{ color: 'var(--text-secondary)' }}>Discovering real places with OpenStreetMap &amp; Overpass...</p>
           </div>
         ) : searchResults.length === 0 ? (
           <div className="empty-state card" style={{ padding: '3.5rem 1.5rem', textAlign: 'center' }}>
-            <Compass size={36} style={{ color: 'var(--accent)', margin: '0 auto 1rem' }} />
-            <h3>No Places Found in {searchQuery}</h3>
-            <p style={{ color: 'var(--text-secondary)', margin: '0.5rem 0 1.5rem' }}>
-              We could not find places matching the selected category. Try searching for a different city or category.
+            <Compass size={36} style={{ color: 'var(--primary-green)', margin: '0 auto 1rem', opacity: 0.8 }} />
+            <h3 style={{ fontFamily: 'var(--font-serif)', fontSize: '1.35rem', margin: '0 0 0.5rem 0' }}>
+              No matching places found for &ldquo;{searchQuery}&rdquo;
+            </h3>
+            <p style={{ color: 'var(--text-secondary)', maxWidth: '480px', margin: '0 auto 1.5rem auto', fontSize: '0.9rem', lineHeight: '1.5' }}>
+              We could not find places for this specific query or category. Try searching another city, town, landmark, or select from popular destinations above.
             </p>
             <button
               type="button"

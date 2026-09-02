@@ -16,9 +16,9 @@ class WikimediaService:
     """
 
     def __init__(self):
-        self.timeout = httpx.Timeout(5.0, connect=3.0)
+        self.timeout = httpx.Timeout(1.8, connect=0.8)
         self.headers = {
-            "User-Agent": "TravelTrack-Explore/3.0 (https://triptrack-frontend.onrender.com; contact: info@triptrack.app)"
+            "User-Agent": "TravelTrack-App/4.0 (https://triptrack-frontend.onrender.com; contact: info@triptrack.app)"
         }
 
     def _get_cache(self, key: str) -> Optional[Dict[str, Any]]:

@@ -6,11 +6,27 @@ from app.schemas.explore import (
     ExploreSearchResponse,
     DestinationSummary,
     PlaceDetailsResponse,
-    PlaceItem
+    PlaceItem,
+    ExploreSuggestionItem
 )
 from app.services.explore.provider import explore_provider
 
 router = APIRouter(prefix="/explore", tags=["Explore & Travel Discovery (OpenStreetMap & Wikimedia)"])
+
+
+@router.get("/suggestions", response_model=List[ExploreSuggestionItem])
+async def get_explore_suggestions(
+    q: str = Query(..., min_length=1, max_length=100, description="Query string for autocomplete"),
+    limit: int = Query(6, ge=1, le=10, description="Max suggestions to return")
+):
+    """
+    Real-time autocomplete search suggestions with typo tolerance worldwide.
+    """
+    try:
+        results = await explore_provider.get_suggestions(query=q, limit=limit)
+        return [ExploreSuggestionItem(**item) for item in results]
+    except Exception:
+        return []
 
 
 @router.get("/photo")
@@ -21,7 +37,6 @@ async def proxy_explore_photo(url: str = Query(..., description="Verified image 
     if not url or not (url.startswith("http://") or url.startswith("https://")):
         raise HTTPException(status_code=400, detail="Invalid image URL")
 
-    # If it's a Wikimedia Commons URL with query parameters, fetch it with authorized User-Agent
     headers = {
         "User-Agent": "TravelTrack-Discovery/3.0 (https://triptrack-frontend.onrender.com; info@triptrack.app)",
         "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
@@ -67,7 +82,9 @@ async def search_explore(
     q: str = Query(..., min_length=1, max_length=100, description="Destination or place search query"),
     category: str = Query("all", description="Filter category: all, attractions, hotels, restaurants, cafes, museums, parks, historic, activities"),
     page: int = Query(1, ge=1, description="Page number for pagination"),
-    limit: int = Query(24, ge=1, le=100, description="Max results per page")
+    limit: int = Query(24, ge=1, le=100, description="Max results per page"),
+    lat: Optional[float] = Query(None, description="Optional canonical latitude from selected suggestion"),
+    lon: Optional[float] = Query(None, description="Optional canonical longitude from selected suggestion")
 ):
     """
     Search for places, attractions, dining, cafes, and stays via Nominatim, Overpass API, and Wikimedia.
@@ -78,7 +95,9 @@ async def search_explore(
             query=q,
             category=category,
             page=page,
-            limit=limit
+            limit=limit,
+            lat=lat,
+            lon=lon
         )
         return ExploreSearchResponse(**results)
     except Exception as e:

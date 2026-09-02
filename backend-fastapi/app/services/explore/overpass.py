@@ -67,10 +67,10 @@ class OverpassService:
 
     def __init__(self):
         self.headers = {
-            "User-Agent": "TravelTrack-Explore/4.0 (https://triptrack-frontend.onrender.com; info@triptrack.app)",
+            "User-Agent": "TravelTrack-App/4.0 (https://triptrack-frontend.onrender.com; contact: info@triptrack.app)",
             "Accept": "application/json",
         }
-        self.timeout = httpx.Timeout(3.5, connect=1.5)
+        self.timeout = httpx.Timeout(1.8, connect=0.8)
         self._cache: Dict[str, tuple[float, List[Dict[str, Any]]]] = {}
         self.cache_ttl = 86400  # 24 hours
 
@@ -232,7 +232,7 @@ out center tags 30;
         elements = []
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            for ep in OVERPASS_ENDPOINTS:
+            for ep in OVERPASS_ENDPOINTS[:2]:
                 try:
                     res_elements = await self._query_single_endpoint(client, ep, query)
                     if res_elements:

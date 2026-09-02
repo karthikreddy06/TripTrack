@@ -74,3 +74,18 @@ class ExploreSearchResponse(BaseModel):
 class PlaceDetailsResponse(BaseModel):
     place: PlaceItem
     nearby_places: List[PlaceItem] = Field(default_factory=list)
+
+
+class ExploreSuggestionItem(BaseModel):
+    id: Optional[str] = None
+    name: str
+    display_name: str
+    city: Optional[str] = None
+    state: Optional[str] = None
+    country: Optional[str] = None
+    lat: float
+    lon: float
+    is_destination: bool = True
+    category: str = "destination"
+    subtitle: Optional[str] = None
+    type: Optional[str] = None
