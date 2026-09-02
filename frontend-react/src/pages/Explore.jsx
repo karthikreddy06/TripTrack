@@ -63,6 +63,7 @@ export const Explore = () => {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState(null);
+  const [destImgError, setDestImgError] = useState(false);
   const [showMap, setShowMap] = useState(false);
   const [selectedPlaceId, setSelectedPlaceId] = useState(null);
 
@@ -77,6 +78,7 @@ export const Explore = () => {
       } else {
         setLoading(true);
         setError(null);
+        setDestImgError(false);
       }
 
       const data = await exploreAPI.search(q.trim(), cat, page, 24);
@@ -174,7 +176,7 @@ export const Explore = () => {
     }
   };
 
-  const hasDestImage = Boolean(destinationInfo?.image_url);
+  const hasDestImage = Boolean(!destImgError && destinationInfo?.image_url);
 
   return (
     <div className="main-content explore-page-container">
@@ -263,7 +265,7 @@ export const Explore = () => {
 
       {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
 
-      {/* Destination Overview Box (Only renders image box IF photo exists) */}
+      {/* Destination Overview Box (Only renders image box IF photo exists and loaded successfully) */}
       {destinationInfo && (
         <div className="card destination-overview-banner" style={{ marginBottom: '2rem' }}>
           <div className={hasDestImage ? 'dest-banner-grid' : 'dest-banner-grid-no-photo'} style={{ display: 'grid', gridTemplateColumns: hasDestImage ? '320px 1fr' : '1fr', gap: '2rem' }}>
@@ -274,6 +276,7 @@ export const Explore = () => {
                   alt={destinationInfo.destination}
                   isVerified={true}
                   style={{ height: '100%' }}
+                  onError={() => setDestImgError(true)}
                 />
               </div>
             )}

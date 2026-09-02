@@ -1791,6 +1791,27 @@
   background: #FFFFFF;
 }
 
+/* Clean No-Photo Cards */
+.place-card.no-photo-card {
+  padding-top: 0;
+  background: var(--surface-card, #ffffff);
+}
+
+.place-card.no-photo-card .place-card-no-photo-header {
+  padding: 1.15rem 1.25rem 0.25rem 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.dest-hero-grid-no-photo,
+.dest-banner-grid-no-photo,
+.place-detail-grid-no-photo {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.5rem;
+}
+
 /* Place Detail Hero */
 .place-detail-hero {
   padding: 2rem;

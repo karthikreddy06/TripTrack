@@ -60,6 +60,7 @@ export const PlaceCard = ({
   const navigate = useNavigate();
   const [saved, setSaved] = useState(isWishlisted);
   const [saving, setSaving] = useState(false);
+  const [imgError, setImgError] = useState(false);
 
   const placeId = place?.id || place?.place_id || place?.provider_id || '';
 
@@ -139,7 +140,15 @@ export const PlaceCard = ({
     : `/explore/place/${encodeURIComponent(placeId)}`;
 
   const photoUrl = resolveImageUrl(place.image_url || (place.photos && place.photos.length > 0 ? place.photos[0] : null));
-  const hasVerifiedPhoto = Boolean(place.image_verified && photoUrl && !photoUrl.includes('undefined'));
+  const hasVerifiedPhoto = Boolean(
+    !imgError &&
+    place.image_verified &&
+    photoUrl &&
+    typeof photoUrl === 'string' &&
+    photoUrl.trim() !== '' &&
+    !photoUrl.includes('undefined') &&
+    !photoUrl.includes('null')
+  );
   const displayDist = anchorDistanceKm ?? place.distance_km;
 
   return (
@@ -155,7 +164,7 @@ export const PlaceCard = ({
       }}
     >
       <div>
-        {/* Render Image ONLY IF a verified photo is available */}
+        {/* Render Image ONLY IF verified real photo exists and hasn't errored */}
         {hasVerifiedPhoto ? (
           <div className="place-card-image-wrapper">
             <SafeImage
@@ -163,6 +172,7 @@ export const PlaceCard = ({
               alt={place.name}
               isVerified={true}
               className="place-card-image"
+              onError={() => setImgError(true)}
             />
 
             <div className="place-card-badge-row">
@@ -197,11 +207,11 @@ export const PlaceCard = ({
             )}
           </div>
         ) : (
-          /* Header when NO photo is available — clean editorial badge & wishlist row */
+          /* Clean info card header when NO verified photo is available — no image box, no empty area */
           <div
             className="place-card-no-photo-header"
             style={{
-              padding: '1.1rem 1.25rem 0.25rem 1.25rem',
+              padding: '1.15rem 1.25rem 0.25rem 1.25rem',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',

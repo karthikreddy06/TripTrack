@@ -29,6 +29,7 @@ export const DestinationDetail = () => {
   const [showMap, setShowMap] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [imgError, setImgError] = useState(false);
 
   const [modalPlace, setModalPlace] = useState(null);
 
@@ -36,6 +37,7 @@ export const DestinationDetail = () => {
     try {
       setLoading(true);
       setError(null);
+      setImgError(false);
       const data = await exploreAPI.getDestination(decodedDestination);
       setDestSummary(data);
     } catch (err) {
@@ -118,7 +120,7 @@ export const DestinationDetail = () => {
     );
   }
 
-  const hasHeroImage = Boolean(destSummary.image_url);
+  const hasHeroImage = Boolean(!imgError && destSummary.image_url);
 
   return (
     <div className="main-content">
@@ -151,6 +153,7 @@ export const DestinationDetail = () => {
                 alt={destSummary.destination}
                 isVerified={true}
                 style={{ height: '100%' }}
+                onError={() => setImgError(true)}
               />
             </div>
           )}

@@ -34,6 +34,7 @@ export const PlaceDetail = () => {
   const [nearbyPlaces, setNearbyPlaces] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [imgError, setImgError] = useState(false);
 
   const [isSaved, setIsSaved] = useState(false);
   const [savingWishlist, setSavingWishlist] = useState(false);
@@ -43,6 +44,7 @@ export const PlaceDetail = () => {
     try {
       setLoading(true);
       setError(null);
+      setImgError(false);
       const data = await exploreAPI.getPlaceDetails(decodedPlaceId);
       setPlaceData(data.place);
       setNearbyPlaces(data.nearby_places || []);
@@ -176,7 +178,7 @@ export const PlaceDetail = () => {
 
   const pId = placeData.id || placeData.place_id || decodedPlaceId;
   const photoUrl = resolveImageUrl(placeData.image_url);
-  const hasVerifiedPhoto = Boolean(placeData.image_verified && photoUrl);
+  const hasVerifiedPhoto = Boolean(!imgError && placeData.image_verified && photoUrl);
 
   return (
     <div className="main-content">
@@ -210,6 +212,7 @@ export const PlaceDetail = () => {
                 alt={placeData.name}
                 isVerified={true}
                 style={{ height: '100%' }}
+                onError={() => setImgError(true)}
               />
             </div>
           )}
