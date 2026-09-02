@@ -16,13 +16,14 @@ import {
   Trees,
   Scroll,
   ChevronDown,
-  Sparkles
+  Sparkles,
+  Calendar,
+  DollarSign
 } from 'lucide-react';
-import { exploreAPI, resolveImageUrl, extractErrorMessage } from '../services/api';
+import { exploreAPI, extractErrorMessage } from '../services/api';
 import { PlaceCard } from '../components/PlaceCard';
 import { MapView } from '../components/MapView';
 import { AddToTripModal } from '../components/AddToTripModal';
-import { SafeImage } from '../components/SafeImage';
 import { Alert } from '../components/Alert';
 
 const CATEGORIES = [
@@ -38,12 +39,12 @@ const CATEGORIES = [
 ];
 
 const FEATURED_SHORTCUTS = [
-  { name: 'Hyderabad', label: 'Hyderabad, India', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/71/Charminar_Hyderabad_1.jpg/330px-Charminar_Hyderabad_1.jpg?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=thumbnail' },
-  { name: 'Goa', label: 'Goa, India', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/e/e9/Fort_Aguada_Goa.jpg/330px-Fort_Aguada_Goa.jpg?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=thumbnail' },
-  { name: 'Bengaluru', label: 'Bengaluru, India', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/d/d5/Glasshouse_and_fountain_at_lalbagh.jpg/330px-Glasshouse_and_fountain_at_lalbagh.jpg?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=thumbnail' },
-  { name: 'Delhi', label: 'Delhi, India', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/5/5b/India_Gate_in_the_Evening.jpg/330px-India_Gate_in_the_Evening.jpg?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=thumbnail' },
-  { name: 'Mumbai', label: 'Mumbai, India', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/3/3a/Mumbai_03-2016_30_Gateway_of_India.jpg/330px-Mumbai_03-2016_30_Gateway_of_India.jpg?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=thumbnail' },
-  { name: 'Paris', label: 'Paris, France', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/a/a8/Tour_Eiffel_Wikimedia_Commons.jpg/330px-Tour_Eiffel_Wikimedia_Commons.jpg?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=thumbnail' },
+  { name: 'Hyderabad', label: 'Hyderabad, India', code: 'HYD' },
+  { name: 'Goa', label: 'Goa, India', code: 'GOA' },
+  { name: 'Bengaluru', label: 'Bengaluru, India', code: 'BLR' },
+  { name: 'Delhi', label: 'Delhi, India', code: 'DEL' },
+  { name: 'Mumbai', label: 'Mumbai, India', code: 'BOM' },
+  { name: 'Paris', label: 'Paris, France', code: 'PAR' },
 ];
 
 export const Explore = () => {
@@ -63,7 +64,6 @@ export const Explore = () => {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState(null);
-  const [destImgError, setDestImgError] = useState(false);
   const [showMap, setShowMap] = useState(false);
   const [selectedPlaceId, setSelectedPlaceId] = useState(null);
 
@@ -78,7 +78,6 @@ export const Explore = () => {
       } else {
         setLoading(true);
         setError(null);
-        setDestImgError(false);
       }
 
       const data = await exploreAPI.search(q.trim(), cat, page, 24);
@@ -176,8 +175,6 @@ export const Explore = () => {
     }
   };
 
-  const hasDestImage = Boolean(!destImgError && destinationInfo?.image_url);
-
   return (
     <div className="main-content explore-page-container">
       {/* Editorial Header & Hero Search */}
@@ -190,7 +187,7 @@ export const Explore = () => {
           <em>want to wander?</em>
         </h1>
         <p className="explore-hero-subtitle">
-          Search destinations, heritage sights, local dining, cafes, and verified stays powered by OpenStreetMap &amp; Wikimedia.
+          Search authentic attractions, historic sights, local dining, cafes, and verified stays powered by OpenStreetMap &amp; Overpass.
         </p>
 
         {/* Search Bar */}
@@ -209,27 +206,55 @@ export const Explore = () => {
           </button>
         </form>
 
-        {/* Featured Destination Shortcuts */}
-        <div className="featured-shortcuts-row">
-          <span className="shortcuts-label">POPULAR DESTINATIONS:</span>
-          {FEATURED_SHORTCUTS.map((sc) => (
-            <button
-              key={sc.name}
-              type="button"
-              className={`shortcut-pill ${searchQuery.toLowerCase() === sc.name.toLowerCase() ? 'active' : ''}`}
-              onClick={() => handleShortcutClick(sc.name)}
-            >
-              <img
-                src={resolveImageUrl(sc.img)}
-                alt={sc.name}
-                className="shortcut-thumb"
-                onError={(e) => {
-                  e.currentTarget.style.display = 'none';
+        {/* Clean Editorial Destination Shortcut Chips (No photo dependency) */}
+        <div className="featured-shortcuts-row" style={{ marginTop: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <span className="shortcuts-label" style={{ fontSize: '0.72rem', fontFamily: 'var(--font-mono)', letterSpacing: '0.06em', color: 'var(--text-secondary)' }}>
+            POPULAR DESTINATIONS:
+          </span>
+          {FEATURED_SHORTCUTS.map((sc) => {
+            const isSelected = searchQuery.toLowerCase() === sc.name.toLowerCase();
+            return (
+              <button
+                key={sc.name}
+                type="button"
+                className={`shortcut-pill ${isSelected ? 'active' : ''}`}
+                onClick={() => handleShortcutClick(sc.name)}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                  padding: '0.35rem 0.75rem',
+                  borderRadius: '20px',
+                  background: isSelected ? 'var(--primary-green, #2f523b)' : 'var(--surface-cream, #f5f4ef)',
+                  color: isSelected ? '#FFFFFF' : 'var(--text-primary, #1a2e22)',
+                  border: isSelected ? '1px solid var(--primary-green)' : '1px solid var(--border-light, #e5e3db)',
+                  cursor: 'pointer',
+                  fontSize: '0.8rem',
+                  fontWeight: 500,
+                  transition: 'all 0.15s ease',
                 }}
-              />
-              <span>{sc.name}</span>
-            </button>
-          ))}
+              >
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: '18px',
+                    height: '18px',
+                    borderRadius: '50%',
+                    background: isSelected ? 'rgba(255, 255, 255, 0.25)' : 'rgba(47, 82, 59, 0.1)',
+                    color: isSelected ? '#FFFFFF' : 'var(--primary-green, #2f523b)',
+                    fontSize: '0.62rem',
+                    fontFamily: 'var(--font-mono)',
+                    fontWeight: 700,
+                  }}
+                >
+                  {sc.code.slice(0, 1)}
+                </span>
+                <span>{sc.name}</span>
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -265,69 +290,166 @@ export const Explore = () => {
 
       {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
 
-      {/* Destination Overview Box (Only renders image box IF photo exists and loaded successfully) */}
+      {/* Destination Editorial Overview Banner (Compact, designed vector graphic) */}
       {destinationInfo && (
-        <div className="card destination-overview-banner" style={{ marginBottom: '2rem' }}>
-          <div className={hasDestImage ? 'dest-banner-grid' : 'dest-banner-grid-no-photo'} style={{ display: 'grid', gridTemplateColumns: hasDestImage ? '320px 1fr' : '1fr', gap: '2rem' }}>
-            {hasDestImage && (
-              <div style={{ maxWidth: '320px', width: '100%', height: '200px', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
-                <SafeImage
-                  src={resolveImageUrl(destinationInfo.image_url)}
-                  alt={destinationInfo.destination}
-                  isVerified={true}
-                  style={{ height: '100%' }}
-                  onError={() => setDestImgError(true)}
-                />
-              </div>
-            )}
+        <div
+          className="card destination-overview-banner"
+          style={{
+            marginBottom: '2rem',
+            padding: 0,
+            overflow: 'hidden',
+            background: 'var(--surface-card, #FFFFFF)',
+            border: '1px solid var(--border, #e5e3db)',
+          }}
+        >
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'minmax(240px, 300px) 1fr',
+              gap: '0',
+            }}
+            className="dest-overview-grid"
+          >
+            {/* Left Decorative Botanical Graphic Block */}
+            <div
+              style={{
+                position: 'relative',
+                background: 'linear-gradient(135deg, #1b3627 0%, #294d38 55%, #3d6e50 100%)',
+                color: '#FFFFFF',
+                padding: '1.75rem 1.5rem',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+                minHeight: '190px',
+                overflow: 'hidden',
+              }}
+            >
+              <svg
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  height: '100%',
+                  opacity: 0.18,
+                  pointerEvents: 'none',
+                }}
+                viewBox="0 0 200 160"
+                preserveAspectRatio="none"
+              >
+                <path d="M-10,40 Q50,120 120,60 T220,90" fill="none" stroke="#FFFFFF" strokeWidth="1.2" strokeDasharray="4 4" />
+                <path d="M-10,90 Q70,20 150,100 T220,40" fill="none" stroke="#FFFFFF" strokeWidth="0.8" />
+                <circle cx="160" cy="40" r="24" fill="none" stroke="#FFFFFF" strokeWidth="0.8" strokeDasharray="3 3" />
+                <circle cx="160" cy="40" r="5" fill="none" stroke="#FFFFFF" strokeWidth="1" />
+              </svg>
 
-            <div className="dest-banner-content">
-              <div className="editorial-mark">
-                <i></i> DESTINATION OVERVIEW
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem' }}>
-                <h2 style={{ fontSize: '1.9rem', margin: 0 }}>{destinationInfo.destination}</h2>
-                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                  <Link
-                    to="/ai-planner"
-                    state={{ prefill: { destination: destinationInfo.destination } }}
-                    className="btn btn-primary btn-sm"
-                  >
-                    <Sparkles size={13} />
-                    <span>Plan with AI</span>
-                  </Link>
-                  <Link
-                    to={`/explore/${encodeURIComponent(destinationInfo.destination.toLowerCase())}`}
-                    className="btn btn-secondary btn-sm"
-                  >
-                    <span>Guide</span>
-                    <ArrowUpRight size={13} />
-                  </Link>
+              <div>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.68rem', letterSpacing: '0.1em', opacity: 0.75, textTransform: 'uppercase' }}>
+                  DESTINATION DOSSIER
                 </div>
+                <h3 style={{ fontSize: '1.75rem', fontFamily: 'var(--font-serif)', margin: '0.25rem 0', color: '#FFFFFF' }}>
+                  {destinationInfo.destination}
+                </h3>
+                {destinationInfo.country && (
+                  <p style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.85rem', color: '#a0e8be', margin: 0 }}>
+                    <MapPin size={13} />
+                    <span>{destinationInfo.country}</span>
+                  </p>
+                )}
               </div>
 
-              {destinationInfo.country && (
-                <p className="dest-banner-location" style={{ marginTop: '0.35rem' }}>
-                  <MapPin size={13} />
-                  <span>{destinationInfo.country}</span>
+              <div style={{ fontSize: '0.7rem', fontFamily: 'var(--font-mono)', color: 'rgba(255, 255, 255, 0.7)' }}>
+                {destinationInfo.lat && destinationInfo.lon
+                  ? `${Math.abs(destinationInfo.lat).toFixed(2)}°N · ${Math.abs(destinationInfo.lon).toFixed(2)}°E`
+                  : 'OpenStreetMap Cartography'}
+              </div>
+            </div>
+
+            {/* Right Editorial Info Content */}
+            <div style={{ padding: '1.5rem 1.75rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '0.5rem' }}>
+                  <div className="editorial-mark" style={{ margin: 0 }}>
+                    <i></i> VERIFIED TRAVEL GUIDE
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                    <Link
+                      to="/ai-planner"
+                      state={{ prefill: { destination: destinationInfo.destination } }}
+                      className="btn btn-primary btn-sm"
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                    >
+                      <Sparkles size={13} />
+                      <span>Plan with AI</span>
+                    </Link>
+                    <Link
+                      to={`/explore/${encodeURIComponent(destinationInfo.destination.toLowerCase())}`}
+                      className="btn btn-secondary btn-sm"
+                    >
+                      <span>Explore Guide</span>
+                      <ArrowUpRight size={13} />
+                    </Link>
+                  </div>
+                </div>
+
+                <p style={{ fontSize: '0.9rem', lineHeight: '1.55', color: 'var(--text-secondary)', margin: '0.5rem 0 1rem 0' }}>
+                  {destinationInfo.description}
                 </p>
-              )}
+              </div>
 
-              <p className="dest-banner-desc">{destinationInfo.description}</p>
-
-              <div className="dest-meta-row">
+              {/* Metadata Pills */}
+              <div style={{ display: 'flex', gap: '0.65rem', flexWrap: 'wrap', alignItems: 'center' }}>
                 {destinationInfo.best_time_to_visit && (
-                  <div className="meta-pill">
-                    <span>Best Time: {destinationInfo.best_time_to_visit}</span>
+                  <div
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.35rem',
+                      background: 'var(--surface-cream, #f5f4ef)',
+                      padding: '3px 9px',
+                      borderRadius: '4px',
+                      fontSize: '0.75rem',
+                      color: 'var(--text-primary)',
+                      fontFamily: 'var(--font-mono)',
+                    }}
+                  >
+                    <Calendar size={11} style={{ color: 'var(--primary-green)' }} />
+                    <span>Season: {destinationInfo.best_time_to_visit}</span>
                   </div>
                 )}
                 {destinationInfo.currency && (
-                  <div className="meta-pill">
+                  <div
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.35rem',
+                      background: 'var(--surface-cream, #f5f4ef)',
+                      padding: '3px 9px',
+                      borderRadius: '4px',
+                      fontSize: '0.75rem',
+                      color: 'var(--text-primary)',
+                      fontFamily: 'var(--font-mono)',
+                    }}
+                  >
+                    <DollarSign size={11} style={{ color: 'var(--primary-green)' }} />
                     <span>Currency: {destinationInfo.currency}</span>
                   </div>
                 )}
-                <div className="meta-pill">
-                  <span>Source: OpenStreetMap &amp; Wikimedia</span>
+                <div
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.35rem',
+                    background: 'rgba(47, 82, 59, 0.08)',
+                    padding: '3px 9px',
+                    borderRadius: '4px',
+                    fontSize: '0.75rem',
+                    color: 'var(--primary-green)',
+                    fontFamily: 'var(--font-mono)',
+                  }}
+                >
+                  <span>OSM Verified</span>
                 </div>
               </div>
             </div>
@@ -346,7 +468,7 @@ export const Explore = () => {
                 : [17.3850, 78.4867]
             }
             zoom={12}
-            height="460px"
+            height="440px"
             selectedPlaceId={selectedPlaceId}
             onSelectPlace={handleSelectMapPlace}
           />

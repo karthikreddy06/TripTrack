@@ -14,13 +14,13 @@ import {
   ExternalLink,
   Sparkles
 } from 'lucide-react';
-import { exploreAPI, wishlistAPI, resolveImageUrl, extractErrorMessage } from '../services/api';
+import { exploreAPI, wishlistAPI, extractErrorMessage } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { PlaceCard } from '../components/PlaceCard';
 import { MapView } from '../components/MapView';
 import { AddToTripModal } from '../components/AddToTripModal';
-import { SafeImage } from '../components/SafeImage';
+import { EditorialCardBanner } from '../components/EditorialCardBanner';
 import { calculateDistanceKm } from '../utils/geo';
 
 export const PlaceDetail = () => {
@@ -34,7 +34,6 @@ export const PlaceDetail = () => {
   const [nearbyPlaces, setNearbyPlaces] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [imgError, setImgError] = useState(false);
 
   const [isSaved, setIsSaved] = useState(false);
   const [savingWishlist, setSavingWishlist] = useState(false);
@@ -44,7 +43,6 @@ export const PlaceDetail = () => {
     try {
       setLoading(true);
       setError(null);
-      setImgError(false);
       const data = await exploreAPI.getPlaceDetails(decodedPlaceId);
       setPlaceData(data.place);
       setNearbyPlaces(data.nearby_places || []);
@@ -88,7 +86,7 @@ export const PlaceDetail = () => {
           name: placeData.name,
           category: placeData.category,
           location: placeData.location || placeData.address,
-          image_url: placeData.image_verified ? placeData.image_url : null,
+          image_url: null,
           rating: placeData.rating || null,
           description: placeData.description,
           metadata: {
@@ -177,8 +175,6 @@ export const PlaceDetail = () => {
   }
 
   const pId = placeData.id || placeData.place_id || decodedPlaceId;
-  const photoUrl = resolveImageUrl(placeData.image_url);
-  const hasVerifiedPhoto = Boolean(!imgError && placeData.image_verified && photoUrl);
 
   return (
     <div className="main-content">
@@ -201,159 +197,187 @@ export const PlaceDetail = () => {
         <span>Back to Explore</span>
       </Link>
 
-      {/* Place Hero Card */}
-      <div className="place-detail-hero card" style={{ marginBottom: '2.5rem' }}>
-        <div className={hasVerifiedPhoto ? 'place-detail-grid' : 'place-detail-grid-no-photo'} style={{ display: 'grid', gridTemplateColumns: hasVerifiedPhoto ? '1.1fr 1fr' : '1fr', gap: '2rem' }}>
-          {/* Main Photo ONLY IF verified */}
-          {hasVerifiedPhoto && (
-            <div className="place-detail-photo-gallery" style={{ height: '360px', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
-              <SafeImage
-                src={photoUrl}
-                alt={placeData.name}
-                isVerified={true}
-                style={{ height: '100%' }}
-                onError={() => setImgError(true)}
-              />
+      {/* Place Hero Card with Botanical Editorial Header */}
+      <div className="place-detail-hero card" style={{ marginBottom: '2.5rem', padding: 0, overflow: 'hidden' }}>
+        <EditorialCardBanner
+          category={placeData.category}
+          name={placeData.name}
+          lat={placeData.lat}
+          lon={placeData.lon}
+          height="140px"
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span
+              style={{
+                background: 'rgba(0, 0, 0, 0.45)',
+                backdropFilter: 'blur(6px)',
+                padding: '3px 9px',
+                borderRadius: '12px',
+                fontSize: '0.72rem',
+                fontFamily: 'var(--font-mono)',
+                color: 'rgba(255, 255, 255, 0.95)',
+                fontWeight: 600,
+              }}
+            >
+              OSM IDENTITY: {pId}
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            {typeof placeData.rating === 'number' && placeData.rating > 0 && (
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '3px',
+                  background: 'rgba(0, 0, 0, 0.45)',
+                  backdropFilter: 'blur(6px)',
+                  padding: '3px 8px',
+                  borderRadius: '12px',
+                  fontSize: '0.75rem',
+                  color: '#fbbf24',
+                  fontWeight: 600,
+                  fontFamily: 'var(--font-mono)',
+                }}
+              >
+                <Star size={11} fill="currentColor" />
+                <span>{placeData.rating.toFixed(1)}</span>
+              </span>
+            )}
+          </div>
+        </EditorialCardBanner>
+
+        <div style={{ padding: '2rem 2rem 2.25rem 2rem' }}>
+          <div className="editorial-mark">
+            <i></i> {placeData.category?.toUpperCase() || 'PLACE DOSSIER'}
+          </div>
+
+          <h1 className="place-detail-title" style={{ fontSize: '2.3rem', margin: '0.35rem 0 0.5rem 0' }}>
+            {placeData.name}
+          </h1>
+
+          <div className="place-detail-address" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--text-secondary)', fontSize: '0.92rem', marginBottom: '1rem' }}>
+            <MapPin size={15} style={{ color: 'var(--primary-green)' }} />
+            <span>{placeData.address || placeData.location || 'Location details available'}</span>
+          </div>
+
+          <p className="place-detail-desc" style={{ lineHeight: '1.7', color: 'var(--text-primary)', fontSize: '1rem', maxWidth: '850px' }}>
+            {placeData.description}
+          </p>
+
+          {/* Tags */}
+          {placeData.tags && placeData.tags.length > 0 && (
+            <div className="place-detail-tags" style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap', marginTop: '1.25rem' }}>
+              {placeData.tags.map((tag, idx) => (
+                <span
+                  key={idx}
+                  className="place-tag"
+                  style={{
+                    fontSize: '0.75rem',
+                    padding: '3px 9px',
+                    borderRadius: '4px',
+                    background: 'var(--surface-cream, #f5f4ef)',
+                    color: 'var(--text-secondary, #555)',
+                    fontFamily: 'var(--font-mono)',
+                  }}
+                >
+                  {tag}
+                </span>
+              ))}
             </div>
           )}
 
-          {/* Place Details Content */}
-          <div className="place-detail-info">
-            <div className="editorial-mark">
-              <i></i> {placeData.category?.toUpperCase() || 'PLACE'}
-            </div>
-
-            <h1 className="place-detail-title" style={{ fontSize: '2.1rem', margin: '0.35rem 0 0.5rem 0' }}>
-              {placeData.name}
-            </h1>
-
-            <div className="place-detail-address" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: '0.75rem' }}>
-              <MapPin size={14} />
-              <span>{placeData.address || placeData.location || 'Location details available'}</span>
-            </div>
-
-            {/* Rating if available */}
-            {typeof placeData.rating === 'number' && placeData.rating > 0 && (
-              <div className="place-detail-rating-row" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '3px', color: '#d97706', fontWeight: 600, fontSize: '0.9rem' }}>
-                  <Star size={14} fill="currentColor" />
-                  <span>{placeData.rating.toFixed(1)}</span>
-                </div>
-                {placeData.review_count > 0 && (
-                  <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                    ({placeData.review_count} reviews)
-                  </span>
-                )}
+          {/* Useful Contact & Provenance Metadata */}
+          <div className="place-detail-meta-box" style={{ marginTop: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.55rem', borderTop: '1px solid var(--border-light)', paddingTop: '1.25rem' }}>
+            {placeData.opening_hours && (
+              <div className="meta-item" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
+                <Clock size={13} />
+                <span><strong>Hours:</strong> {placeData.opening_hours}</span>
               </div>
             )}
 
-            <p className="place-detail-desc" style={{ lineHeight: '1.65', color: 'var(--text-primary)', fontSize: '0.95rem' }}>
-              {placeData.description}
-            </p>
-
-            {/* Tags */}
-            {placeData.tags && placeData.tags.length > 0 && (
-              <div className="place-detail-tags" style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginTop: '1rem' }}>
-                {placeData.tags.map((tag, idx) => (
-                  <span key={idx} className="place-tag">
-                    {tag}
-                  </span>
-                ))}
+            {placeData.phone && (
+              <div className="meta-item" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
+                <Phone size={13} />
+                <span><strong>Phone:</strong> {placeData.phone}</span>
               </div>
             )}
 
-            {/* Useful Contact & Provenance Metadata */}
-            <div className="place-detail-meta-box" style={{ marginTop: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
-              {placeData.opening_hours && (
-                <div className="meta-item" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
-                  <Clock size={13} />
-                  <span><strong>Hours:</strong> {placeData.opening_hours}</span>
-                </div>
-              )}
+            {placeData.website && (
+              <div className="meta-item" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
+                <Globe size={13} />
+                <a
+                  href={placeData.website}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: 'var(--primary-green)', textDecoration: 'underline' }}
+                >
+                  Official Website
+                </a>
+              </div>
+            )}
 
-              {placeData.phone && (
-                <div className="meta-item" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
-                  <Phone size={13} />
-                  <span><strong>Phone:</strong> {placeData.phone}</span>
-                </div>
-              )}
+            {placeData.wikipedia_url && (
+              <div className="meta-item" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
+                <Scroll size={13} />
+                <a
+                  href={placeData.wikipedia_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: 'var(--primary-green)', textDecoration: 'underline' }}
+                >
+                  Wikipedia Article
+                </a>
+              </div>
+            )}
 
-              {placeData.website && (
-                <div className="meta-item" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
-                  <Globe size={13} />
-                  <a
-                    href={placeData.website}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{ color: 'var(--primary-green)', textDecoration: 'underline' }}
-                  >
-                    Official Website
-                  </a>
-                </div>
-              )}
+            {placeData.source?.source_url && (
+              <div className="meta-item" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
+                <ExternalLink size={13} />
+                <a
+                  href={placeData.source.source_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: 'var(--text-secondary)', textDecoration: 'underline' }}
+                >
+                  OpenStreetMap Cartography Provenance
+                </a>
+              </div>
+            )}
+          </div>
 
-              {placeData.wikipedia_url && (
-                <div className="meta-item" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
-                  <Scroll size={13} />
-                  <a
-                    href={placeData.wikipedia_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{ color: 'var(--primary-green)', textDecoration: 'underline' }}
-                  >
-                    Wikipedia Article
-                  </a>
-                </div>
-              )}
+          {/* Action Buttons */}
+          <div className="place-detail-actions-row" style={{ marginTop: '1.75rem', display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={handleToggleWishlist}
+              disabled={savingWishlist}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem' }}
+            >
+              <Heart size={14} fill={isSaved ? 'var(--accent)' : 'none'} color={isSaved ? 'var(--accent)' : 'currentColor'} />
+              <span>{isSaved ? 'Saved in Wishlist' : 'Save to Wishlist'}</span>
+            </button>
 
-              {placeData.source?.source_url && (
-                <div className="meta-item" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
-                  <ExternalLink size={13} />
-                  <a
-                    href={placeData.source.source_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{ color: 'var(--text-secondary)', textDecoration: 'underline' }}
-                  >
-                    OpenStreetMap Provenance
-                  </a>
-                </div>
-              )}
-            </div>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => setModalPlace(placeData)}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem' }}
+            >
+              <Plus size={14} />
+              <span>Add to Trip</span>
+            </button>
 
-            {/* Action Buttons */}
-            <div className="place-detail-actions-row" style={{ marginTop: '1.75rem', display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={handleToggleWishlist}
-                disabled={savingWishlist}
-                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem' }}
-              >
-                <Heart size={14} fill={isSaved ? 'var(--accent)' : 'none'} color={isSaved ? 'var(--accent)' : 'currentColor'} />
-                <span>{isSaved ? 'Saved in Wishlist' : 'Save to Wishlist'}</span>
-              </button>
-
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() => setModalPlace(placeData)}
-                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem' }}
-              >
-                <Plus size={14} />
-                <span>Add to Trip</span>
-              </button>
-
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={handlePlanAroundPlace}
-                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', color: 'var(--primary-green)' }}
-              >
-                <Sparkles size={14} />
-                <span>Plan Around This Place</span>
-              </button>
-            </div>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={handlePlanAroundPlace}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', color: 'var(--primary-green)' }}
+            >
+              <Sparkles size={14} />
+              <span>Plan Around This Place</span>
+            </button>
           </div>
         </div>
       </div>

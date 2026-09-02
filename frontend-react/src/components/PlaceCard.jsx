@@ -6,43 +6,14 @@ import {
   Heart,
   Plus,
   ArrowUpRight,
-  Utensils,
-  Hotel,
-  Landmark,
-  Compass,
-  Coffee,
-  Trees,
-  Scroll,
   Sparkles,
   Navigation
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
-import { wishlistAPI, resolveImageUrl } from '../services/api';
-import { SafeImage } from './SafeImage';
+import { wishlistAPI } from '../services/api';
+import { EditorialCardBanner } from './EditorialCardBanner';
 import { formatDistance } from '../utils/geo';
-
-const getCategoryIcon = (category) => {
-  switch (category?.toLowerCase()) {
-    case 'hotel':
-      return <Hotel size={12} />;
-    case 'restaurant':
-      return <Utensils size={12} />;
-    case 'cafe':
-      return <Coffee size={12} />;
-    case 'museum':
-    case 'attraction':
-      return <Landmark size={12} />;
-    case 'park':
-      return <Trees size={12} />;
-    case 'historic':
-      return <Scroll size={12} />;
-    case 'activity':
-      return <Compass size={12} />;
-    default:
-      return <MapPin size={12} />;
-  }
-};
 
 export const PlaceCard = ({
   place,
@@ -60,7 +31,6 @@ export const PlaceCard = ({
   const navigate = useNavigate();
   const [saved, setSaved] = useState(isWishlisted);
   const [saving, setSaving] = useState(false);
-  const [imgError, setImgError] = useState(false);
 
   const placeId = place?.id || place?.place_id || place?.provider_id || '';
 
@@ -89,7 +59,7 @@ export const PlaceCard = ({
           name: place.name,
           category: place.category,
           location: place.location || place.address,
-          image_url: place.image_verified ? place.image_url : null,
+          image_url: null,
           rating: place.rating || null,
           description: place.description,
           metadata: {
@@ -139,127 +109,110 @@ export const PlaceCard = ({
     ? `/explore/${encodeURIComponent(place.name.toLowerCase())}`
     : `/explore/place/${encodeURIComponent(placeId)}`;
 
-  const photoUrl = resolveImageUrl(place.image_url || (place.photos && place.photos.length > 0 ? place.photos[0] : null));
-  const hasVerifiedPhoto = Boolean(
-    !imgError &&
-    place.image_verified &&
-    photoUrl &&
-    typeof photoUrl === 'string' &&
-    photoUrl.trim() !== '' &&
-    !photoUrl.includes('undefined') &&
-    !photoUrl.includes('null')
-  );
   const displayDist = anchorDistanceKm ?? place.distance_km;
 
   return (
     <div
       id={`place-card-${placeId}`}
-      className={`place-card card ${isActive ? 'active-map-card' : ''} ${!hasVerifiedPhoto ? 'no-photo-card' : ''}`}
+      className={`place-card card ${isActive ? 'active-map-card' : ''}`}
       onClick={() => onCardClick && onCardClick(place)}
       style={{
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'space-between',
-        transition: 'transform 0.2s, box-shadow 0.2s',
+        transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+        overflow: 'hidden',
+        padding: 0,
       }}
     >
       <div>
-        {/* Render Image ONLY IF verified real photo exists and hasn't errored */}
-        {hasVerifiedPhoto ? (
-          <div className="place-card-image-wrapper">
-            <SafeImage
-              src={photoUrl}
-              alt={place.name}
-              isVerified={true}
-              className="place-card-image"
-              onError={() => setImgError(true)}
-            />
-
-            <div className="place-card-badge-row">
-              <span className={`place-category-badge cat-${place.category?.toLowerCase()}`}>
-                {getCategoryIcon(place.category)}
-                <span>{place.category?.toUpperCase()}</span>
-              </span>
-
-              {typeof place.rating === 'number' && place.rating > 0 && (
-                <span className="place-rating-badge">
-                  <Star size={11} fill="currentColor" />
-                  <span>{place.rating.toFixed(1)}</span>
-                  {place.review_count > 0 && (
-                    <span style={{ opacity: 0.8, fontSize: '0.65rem' }}>({place.review_count})</span>
-                  )}
-                </span>
-              )}
-            </div>
-
-            {/* Wishlist toggle heart button */}
-            {!showRemoveButton && (
-              <button
-                type="button"
-                className={`place-wishlist-btn ${saved ? 'saved' : ''}`}
-                onClick={handleToggleWishlist}
-                disabled={saving}
-                title={saved ? 'Remove from Wishlist' : 'Save to Wishlist'}
-                aria-label="Wishlist"
-              >
-                <Heart size={16} fill={saved ? 'var(--accent)' : 'none'} />
-              </button>
-            )}
-          </div>
-        ) : (
-          /* Clean info card header when NO verified photo is available — no image box, no empty area */
-          <div
-            className="place-card-no-photo-header"
-            style={{
-              padding: '1.15rem 1.25rem 0.25rem 1.25rem',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <span className={`place-category-badge cat-${place.category?.toLowerCase()}`}>
-                {getCategoryIcon(place.category)}
-                <span>{place.category?.toUpperCase()}</span>
-              </span>
-
-              {typeof place.rating === 'number' && place.rating > 0 && (
-                <span className="place-rating-badge">
-                  <Star size={11} fill="currentColor" />
-                  <span>{place.rating.toFixed(1)}</span>
-                </span>
-              )}
-            </div>
-
-            {!showRemoveButton && (
-              <button
-                type="button"
-                className={`place-wishlist-btn-inline ${saved ? 'saved' : ''}`}
-                onClick={handleToggleWishlist}
-                disabled={saving}
-                title={saved ? 'Remove from Wishlist' : 'Save to Wishlist'}
-                aria-label="Wishlist"
+        {/* Editorial Visual Header (Botanical / Topographic vector illustration) */}
+        <EditorialCardBanner
+          category={place.category}
+          name={place.name}
+          lat={place.lat}
+          lon={place.lon}
+          height="112px"
+        >
+          {/* Top Row Badges within Banner */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+            {typeof place.rating === 'number' && place.rating > 0 ? (
+              <span
                 style={{
-                  background: saved ? 'var(--accent-light, #f4e8dc)' : 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                  padding: '4px',
-                  borderRadius: '50%',
-                  display: 'flex',
+                  display: 'inline-flex',
                   alignItems: 'center',
-                  color: saved ? 'var(--accent)' : 'var(--text-secondary)',
+                  gap: '3px',
+                  background: 'rgba(0, 0, 0, 0.45)',
+                  backdropFilter: 'blur(6px)',
+                  padding: '2px 7px',
+                  borderRadius: '12px',
+                  fontSize: '0.72rem',
+                  color: '#fbbf24',
+                  fontWeight: 600,
+                  fontFamily: 'var(--font-mono, monospace)',
                 }}
               >
-                <Heart size={16} fill={saved ? 'var(--accent)' : 'none'} />
-              </button>
+                <Star size={10} fill="currentColor" />
+                <span>{place.rating.toFixed(1)}</span>
+              </span>
+            ) : (
+              <span
+                style={{
+                  background: 'rgba(255, 255, 255, 0.15)',
+                  backdropFilter: 'blur(6px)',
+                  padding: '2px 7px',
+                  borderRadius: '12px',
+                  fontSize: '0.62rem',
+                  letterSpacing: '0.05em',
+                  fontFamily: 'var(--font-mono, monospace)',
+                  color: 'rgba(255, 255, 255, 0.9)',
+                }}
+              >
+                OSM VERIFIED
+              </span>
             )}
           </div>
-        )}
+
+          {!showRemoveButton && (
+            <button
+              type="button"
+              className={`place-wishlist-btn-header ${saved ? 'saved' : ''}`}
+              onClick={handleToggleWishlist}
+              disabled={saving}
+              title={saved ? 'Remove from Wishlist' : 'Save to Wishlist'}
+              aria-label="Wishlist"
+              style={{
+                background: saved ? 'var(--accent, #d97706)' : 'rgba(0, 0, 0, 0.35)',
+                backdropFilter: 'blur(6px)',
+                border: 'none',
+                cursor: 'pointer',
+                padding: '6px',
+                borderRadius: '50%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: saved ? '#FFFFFF' : 'rgba(255, 255, 255, 0.85)',
+                transition: 'transform 0.15s ease, background 0.15s ease',
+              }}
+            >
+              <Heart size={14} fill={saved ? '#FFFFFF' : 'none'} />
+            </button>
+          )}
+        </EditorialCardBanner>
 
         {/* Card Body */}
-        <div className="place-card-body" style={{ padding: '0.85rem 1.25rem 1rem 1.25rem' }}>
+        <div className="place-card-body" style={{ padding: '0.95rem 1.25rem 0.85rem 1.25rem' }}>
           <Link to={detailUrl} className="place-card-title-link">
-            <h3 className="place-card-title" style={{ fontSize: '1.15rem', marginBottom: '0.35rem' }}>
+            <h3
+              className="place-card-title"
+              style={{
+                fontSize: '1.18rem',
+                marginBottom: '0.3rem',
+                fontFamily: 'var(--font-serif, Georgia, serif)',
+                fontWeight: 600,
+                lineHeight: 1.25,
+              }}
+            >
               {place.name}
             </h3>
           </Link>
@@ -271,17 +224,17 @@ export const PlaceCard = ({
               alignItems: 'center',
               gap: '0.35rem',
               fontSize: '0.8rem',
-              color: 'var(--text-secondary)',
-              marginBottom: '0.5rem',
+              color: 'var(--text-secondary, #6b7280)',
+              marginBottom: '0.45rem',
             }}
           >
-            <MapPin size={13} style={{ flexShrink: 0 }} />
+            <MapPin size={13} style={{ flexShrink: 0, color: 'var(--primary-green, #2f523b)' }} />
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {place.address || (typeof place.location === 'string' ? place.location : '')}
             </span>
           </div>
 
-          {/* Distance Indicator if available */}
+          {/* Distance Tag */}
           {displayDist !== null && displayDist !== undefined && (
             <div
               style={{
@@ -289,16 +242,16 @@ export const PlaceCard = ({
                 alignItems: 'center',
                 gap: '0.3rem',
                 fontFamily: 'var(--font-mono, monospace)',
-                fontSize: '0.75rem',
-                color: 'var(--primary-green)',
-                background: 'rgba(95, 155, 104, 0.1)',
+                fontSize: '0.74rem',
+                color: 'var(--primary-green, #2f523b)',
+                background: 'rgba(47, 82, 59, 0.08)',
                 padding: '2px 7px',
                 borderRadius: '4px',
-                marginBottom: '0.65rem',
+                marginBottom: '0.55rem',
                 fontWeight: 600,
               }}
             >
-              <Navigation size={11} />
+              <Navigation size={10} />
               <span>{formatDistance(displayDist)} away</span>
             </div>
           )}
@@ -307,12 +260,12 @@ export const PlaceCard = ({
             <p
               className="place-card-description"
               style={{
-                fontSize: '0.85rem',
+                fontSize: '0.84rem',
                 lineHeight: 1.45,
-                color: 'var(--text-secondary)',
-                marginBottom: '0.75rem',
+                color: 'var(--text-secondary, #4b5563)',
+                marginBottom: '0.65rem',
                 display: '-webkit-box',
-                WebkitLineClamp: 3,
+                WebkitLineClamp: 2,
                 WebkitBoxOrient: 'vertical',
                 overflow: 'hidden',
               }}
@@ -325,7 +278,18 @@ export const PlaceCard = ({
           {place.tags && place.tags.length > 0 && (
             <div className="place-card-tags" style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
               {place.tags.slice(0, 3).map((t, idx) => (
-                <span key={idx} className="place-tag" style={{ fontSize: '0.7rem', padding: '2px 7px' }}>
+                <span
+                  key={idx}
+                  className="place-tag"
+                  style={{
+                    fontSize: '0.68rem',
+                    padding: '2px 7px',
+                    borderRadius: '4px',
+                    background: 'var(--surface-cream, #f5f4ef)',
+                    color: 'var(--text-secondary, #555)',
+                    fontFamily: 'var(--font-mono, monospace)',
+                  }}
+                >
                   {t}
                 </span>
               ))}
@@ -338,11 +302,12 @@ export const PlaceCard = ({
       <div
         className="place-card-footer"
         style={{
-          padding: '0.75rem 1.25rem 1.1rem 1.25rem',
-          borderTop: '1px solid var(--border-light, #f0f0f0)',
+          padding: '0.75rem 1.25rem 1rem 1.25rem',
+          borderTop: '1px solid var(--border-light, #eae8e1)',
           display: 'flex',
-          gap: '0.5rem',
+          gap: '0.45rem',
           alignItems: 'center',
+          background: '#FFFFFF',
         }}
       >
         {showRemoveButton ? (

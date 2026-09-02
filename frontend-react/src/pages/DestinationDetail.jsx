@@ -14,11 +14,10 @@ import {
   Map,
   Grid
 } from 'lucide-react';
-import { exploreAPI, resolveImageUrl, extractErrorMessage } from '../services/api';
+import { exploreAPI, extractErrorMessage } from '../services/api';
 import { PlaceCard } from '../components/PlaceCard';
 import { MapView } from '../components/MapView';
 import { AddToTripModal } from '../components/AddToTripModal';
-import { SafeImage } from '../components/SafeImage';
 
 export const DestinationDetail = () => {
   const { destination } = useParams();
@@ -29,7 +28,6 @@ export const DestinationDetail = () => {
   const [showMap, setShowMap] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [imgError, setImgError] = useState(false);
 
   const [modalPlace, setModalPlace] = useState(null);
 
@@ -37,7 +35,6 @@ export const DestinationDetail = () => {
     try {
       setLoading(true);
       setError(null);
-      setImgError(false);
       const data = await exploreAPI.getDestination(decodedDestination);
       setDestSummary(data);
     } catch (err) {
@@ -120,8 +117,6 @@ export const DestinationDetail = () => {
     );
   }
 
-  const hasHeroImage = Boolean(!imgError && destSummary.image_url);
-
   return (
     <div className="main-content">
       {/* Back to Explore */}
@@ -143,72 +138,151 @@ export const DestinationDetail = () => {
         <span>All Destinations</span>
       </Link>
 
-      {/* Destination Hero Header */}
-      <div className="destination-hero-header card">
-        <div className={hasHeroImage ? 'dest-hero-grid' : 'dest-hero-grid-no-photo'} style={{ display: 'grid', gridTemplateColumns: hasHeroImage ? '340px 1fr' : '1fr', gap: '2rem' }}>
-          {hasHeroImage && (
-            <div style={{ maxWidth: '340px', width: '100%', height: '260px', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
-              <SafeImage
-                src={resolveImageUrl(destSummary.image_url)}
-                alt={destSummary.destination}
-                isVerified={true}
-                style={{ height: '100%' }}
-                onError={() => setImgError(true)}
-              />
+      {/* Destination Hero Header (Rich Editorial Vector Banner) */}
+      <div
+        className="destination-hero-header card"
+        style={{
+          marginBottom: '2.5rem',
+          padding: 0,
+          overflow: 'hidden',
+          border: '1px solid var(--border, #e5e3db)',
+        }}
+      >
+        <div
+          style={{
+            position: 'relative',
+            background: 'linear-gradient(135deg, #183324 0%, #264a35 50%, #3a684b 100%)',
+            color: '#FFFFFF',
+            padding: '2.25rem 2rem',
+            overflow: 'hidden',
+          }}
+        >
+          {/* Topographic Vector Pattern */}
+          <svg
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: '100%',
+              opacity: 0.16,
+              pointerEvents: 'none',
+            }}
+            viewBox="0 0 600 200"
+            preserveAspectRatio="none"
+          >
+            <path d="M-20,100 C120,20 280,180 440,60 C520,0 580,120 640,80" fill="none" stroke="#FFFFFF" strokeWidth="1.2" strokeDasharray="4 4" />
+            <path d="M-20,160 C150,80 300,190 460,110 C530,70 590,160 640,120" fill="none" stroke="#FFFFFF" strokeWidth="0.8" />
+            <circle cx="500" cy="50" r="30" fill="none" stroke="#FFFFFF" strokeWidth="0.8" strokeDasharray="3 3" />
+            <circle cx="500" cy="50" r="6" fill="none" stroke="#FFFFFF" strokeWidth="1" />
+          </svg>
+
+          <div style={{ position: 'relative', zIndex: 2 }}>
+            <div className="editorial-mark" style={{ color: 'rgba(255, 255, 255, 0.8)', borderColor: 'rgba(255, 255, 255, 0.3)' }}>
+              <i></i> 02 / DESTINATION DOSSIER
             </div>
-          )}
 
-          <div className="dest-hero-content">
-            <div className="editorial-mark">
-              <i></i> 02 / DESTINATION GUIDE
-            </div>
-            <h1 className="dest-hero-title">{destSummary.destination}</h1>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem', marginTop: '0.45rem' }}>
+              <div>
+                <h1 style={{ fontSize: '2.5rem', fontFamily: 'var(--font-serif)', margin: '0 0 0.35rem 0', color: '#FFFFFF' }}>
+                  {destSummary.destination}
+                </h1>
 
-            {destSummary.country && (
-              <p className="dest-hero-location">
-                <MapPin size={15} />
-                <span>{destSummary.country}</span>
-              </p>
-            )}
+                {destSummary.country && (
+                  <p style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#a0e8be', fontSize: '0.95rem', margin: 0 }}>
+                    <MapPin size={15} />
+                    <span>{destSummary.country}</span>
+                    {destSummary.lat && destSummary.lon && (
+                      <span style={{ color: 'rgba(255, 255, 255, 0.65)', fontFamily: 'var(--font-mono)', fontSize: '0.75rem', marginLeft: '0.5rem' }}>
+                        ({Math.abs(destSummary.lat).toFixed(2)}°N, {Math.abs(destSummary.lon).toFixed(2)}°E)
+                      </span>
+                    )}
+                  </p>
+                )}
+              </div>
 
-            <p className="dest-hero-overview">
-              {destSummary.overview || destSummary.description}
-            </p>
-
-            <div className="dest-meta-row" style={{ marginTop: '1.25rem' }}>
-              {destSummary.best_time_to_visit && (
-                <div className="meta-pill">
-                  <Calendar size={13} />
-                  <span>Best Season: {destSummary.best_time_to_visit}</span>
-                </div>
-              )}
-              {destSummary.currency && (
-                <div className="meta-pill">
-                  <DollarSign size={13} />
-                  <span>Currency: {destSummary.currency}</span>
-                </div>
-              )}
-              <div className="meta-pill">
-                <span>Source: OpenStreetMap &amp; Wikimedia</span>
+              <div style={{ display: 'flex', gap: '0.65rem', alignItems: 'center' }}>
+                <Link
+                  to="/ai-planner"
+                  state={{ prefill: { destination: destSummary.destination } }}
+                  className="btn btn-primary"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', background: 'var(--accent, #d97706)', border: 'none' }}
+                >
+                  <Sparkles size={14} />
+                  <span>Plan Trip with AI</span>
+                </Link>
+                <Link
+                  to="/trips/new"
+                  state={{ prefill: { destination: destSummary.destination } }}
+                  className="btn btn-secondary"
+                  style={{ background: 'rgba(255, 255, 255, 0.15)', color: '#FFFFFF', border: '1px solid rgba(255, 255, 255, 0.25)' }}
+                >
+                  <span>Manual Itinerary</span>
+                </Link>
               </div>
             </div>
 
-            <div className="dest-hero-actions" style={{ marginTop: '1.5rem', display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-              <Link
-                to="/ai-planner"
-                state={{ prefill: { destination: destSummary.destination } }}
-                className="btn btn-primary btn-sm"
+            <p style={{ fontSize: '0.95rem', lineHeight: '1.65', color: 'rgba(255, 255, 255, 0.9)', maxWidth: '850px', margin: '1rem 0 1.25rem 0' }}>
+              {destSummary.overview || destSummary.description}
+            </p>
+
+            <div style={{ display: 'flex', gap: '0.65rem', flexWrap: 'wrap', alignItems: 'center' }}>
+              {destSummary.best_time_to_visit && (
+                <div
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.35rem',
+                    background: 'rgba(0, 0, 0, 0.35)',
+                    backdropFilter: 'blur(6px)',
+                    padding: '4px 10px',
+                    borderRadius: '12px',
+                    fontSize: '0.75rem',
+                    color: 'rgba(255, 255, 255, 0.95)',
+                    fontFamily: 'var(--font-mono)',
+                  }}
+                >
+                  <Calendar size={12} style={{ color: '#a0e8be' }} />
+                  <span>Best Season: {destSummary.best_time_to_visit}</span>
+                </div>
+              )}
+
+              {destSummary.currency && (
+                <div
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.35rem',
+                    background: 'rgba(0, 0, 0, 0.35)',
+                    backdropFilter: 'blur(6px)',
+                    padding: '4px 10px',
+                    borderRadius: '12px',
+                    fontSize: '0.75rem',
+                    color: 'rgba(255, 255, 255, 0.95)',
+                    fontFamily: 'var(--font-mono)',
+                  }}
+                >
+                  <DollarSign size={12} style={{ color: '#a0e8be' }} />
+                  <span>Currency: {destSummary.currency}</span>
+                </div>
+              )}
+
+              <div
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.35rem',
+                  background: 'rgba(255, 255, 255, 0.15)',
+                  backdropFilter: 'blur(6px)',
+                  padding: '4px 10px',
+                  borderRadius: '12px',
+                  fontSize: '0.75rem',
+                  color: 'rgba(255, 255, 255, 0.95)',
+                  fontFamily: 'var(--font-mono)',
+                }}
               >
-                <Sparkles size={13} />
-                <span>Plan Trip to {destSummary.destination} with AI</span>
-              </Link>
-              <Link
-                to={`/trips/new`}
-                state={{ prefill: { destination: destSummary.destination } }}
-                className="btn btn-secondary btn-sm"
-              >
-                <span>Create Manual Itinerary</span>
-              </Link>
+                <span>OpenStreetMap &amp; Overpass Grounding</span>
+              </div>
             </div>
           </div>
         </div>
