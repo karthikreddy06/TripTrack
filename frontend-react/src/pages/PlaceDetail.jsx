@@ -8,12 +8,9 @@ import {
   ArrowLeft,
   Globe,
   Clock,
-  DollarSign,
-  Utensils,
-  Hotel,
-  Landmark,
-  Compass,
-  Tag
+  Phone,
+  CameraOff,
+  Navigation
 } from 'lucide-react';
 import { exploreAPI, wishlistAPI, extractErrorMessage } from '../services/api';
 import { useAuth } from '../context/AuthContext';
@@ -21,15 +18,16 @@ import { useToast } from '../context/ToastContext';
 import { PlaceCard } from '../components/PlaceCard';
 import { MapView } from '../components/MapView';
 import { AddToTripModal } from '../components/AddToTripModal';
-import { Alert } from '../components/Alert';
 
 export const PlaceDetail = () => {
   const { placeId } = useParams();
+  const decodedPlaceId = decodeURIComponent(placeId || '');
   const { isAuthenticated } = useAuth();
   const { showSuccess, showError } = useToast();
 
   const [placeData, setPlaceData] = useState(null);
   const [nearbyPlaces, setNearbyPlaces] = useState([]);
+  const [activePhotoIndex, setActivePhotoIndex] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -41,13 +39,14 @@ export const PlaceDetail = () => {
     try {
       setLoading(true);
       setError(null);
-      const data = await exploreAPI.getPlaceDetails(placeId);
+      const data = await exploreAPI.getPlaceDetails(decodedPlaceId);
       setPlaceData(data.place);
       setNearbyPlaces(data.nearby_places || []);
+      setActivePhotoIndex(0);
 
-      // Check wishlist status if user is authenticated
+      // Check wishlist status if authenticated
       if (isAuthenticated) {
-        const check = await wishlistAPI.checkSaved(placeId);
+        const check = await wishlistAPI.checkSaved(decodedPlaceId);
         setIsSaved(check.is_saved);
       }
     } catch (err) {
@@ -55,7 +54,7 @@ export const PlaceDetail = () => {
     } finally {
       setLoading(false);
     }
-  }, [placeId, isAuthenticated]);
+  }, [decodedPlaceId, isAuthenticated]);
 
   useEffect(() => {
     fetchPlace();
@@ -82,7 +81,7 @@ export const PlaceDetail = () => {
           name: placeData.name,
           category: placeData.category,
           location: placeData.location,
-          image_url: placeData.image_url,
+          image_url: placeData.image_url || (placeData.photos && placeData.photos[0]) || null,
           rating: placeData.rating,
           description: placeData.description,
           metadata: {
@@ -91,12 +90,14 @@ export const PlaceDetail = () => {
             address: placeData.address,
             price_level: placeData.price_level,
             tags: placeData.tags,
+            review_count: placeData.review_count,
+            provider_place_id: placeData.provider_place_id || placeData.place_id
           },
         });
         setIsSaved(true);
         showSuccess(`Saved "${placeData.name}" to wishlist!`);
       }
-    } catch (err) {
+    } catch {
       showError('Failed to update wishlist. Please try again.');
     } finally {
       setSavingWishlist(false);
@@ -108,7 +109,7 @@ export const PlaceDetail = () => {
       <div className="main-content">
         <div className="loading-container" style={{ padding: '6rem 1rem' }}>
           <div className="spinner spinner-lg" />
-          <p style={{ marginTop: '1rem' }}>Loading place details...</p>
+          <p style={{ marginTop: '1rem' }}>Loading verified place details...</p>
         </div>
       </div>
     );
@@ -134,7 +135,6 @@ export const PlaceDetail = () => {
           <span>Back to Explore</span>
         </Link>
         <div className="card" style={{ textAlign: 'center', padding: '3rem 1.5rem' }}>
-          <Compass size={36} style={{ color: 'var(--accent)', margin: '0 auto 1rem' }} />
           <h2>Place Information Unavailable</h2>
           <p style={{ color: 'var(--text-secondary)', margin: '0.5rem 0 1.5rem' }}>
             {error || 'Unable to load place details.'}
@@ -146,6 +146,14 @@ export const PlaceDetail = () => {
       </div>
     );
   }
+
+  const photosList = placeData.photos && placeData.photos.length > 0
+    ? placeData.photos
+    : placeData.image_url
+    ? [placeData.image_url]
+    : [];
+
+  const currentPhoto = photosList[activePhotoIndex] || null;
 
   return (
     <div className="main-content">
@@ -171,17 +179,43 @@ export const PlaceDetail = () => {
       {/* Place Hero Card */}
       <div className="card place-detail-hero" style={{ marginBottom: '2.5rem' }}>
         <div className="place-detail-hero-grid">
-          {/* Main Photo */}
-          <div className="place-detail-img-col">
-            <img
-              src={
-                placeData.image_url ||
-                'https://images.unsplash.com/photo-1488646953014-85cb44e25828?auto=format&fit=crop&w=1200&q=80'
-              }
-              alt={placeData.name}
-              className="place-detail-hero-img"
-              loading="lazy"
-            />
+          {/* Photo Gallery Column */}
+          <div className="place-detail-gallery-col">
+            <div className="place-detail-hero-img-wrapper">
+              {currentPhoto ? (
+                <img
+                  src={currentPhoto}
+                  alt={placeData.name}
+                  className="place-detail-hero-img"
+                  loading="lazy"
+                />
+              ) : (
+                <div className="no-photo-placeholder" style={{ height: '380px', borderRadius: 'var(--radius-lg)' }}>
+                  <CameraOff size={36} className="no-photo-icon" />
+                  <span className="no-photo-text">No verified photo available from provider</span>
+                </div>
+              )}
+            </div>
+
+            {/* Thumbnail Strip */}
+            {photosList.length > 1 && (
+              <div className="place-detail-thumb-strip">
+                {photosList.map((photoUrl, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    className={`place-gallery-thumb-btn ${idx === activePhotoIndex ? 'active' : ''}`}
+                    onClick={() => setActivePhotoIndex(idx)}
+                  >
+                    <img
+                      src={photoUrl}
+                      alt={`${placeData.name} ${idx + 1}`}
+                      className="place-gallery-thumb-img"
+                    />
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Place Content */}
@@ -199,6 +233,9 @@ export const PlaceDetail = () => {
                 <span className="place-rating-badge">
                   <Star size={11} fill="currentColor" />
                   <span>{placeData.rating.toFixed(1)}</span>
+                  {placeData.review_count > 0 && (
+                    <span style={{ opacity: 0.8, fontSize: '0.65rem' }}>({placeData.review_count} reviews)</span>
+                  )}
                 </span>
               )}
 
@@ -214,17 +251,12 @@ export const PlaceDetail = () => {
               <span>{placeData.address || placeData.location}</span>
             </div>
 
-            <p className="place-detail-desc">{placeData.description}</p>
+            {placeData.description && (
+              <p className="place-detail-desc">{placeData.description}</p>
+            )}
 
-            {/* Meta Grid (Amenities, Cuisine, Hours, Website) */}
+            {/* Metadata Grid */}
             <div className="place-detail-meta-box">
-              {placeData.cuisine && (
-                <div className="meta-item">
-                  <Utensils size={13} />
-                  <span><strong>Cuisine:</strong> {placeData.cuisine}</span>
-                </div>
-              )}
-
               {placeData.opening_hours && (
                 <div className="meta-item">
                   <Clock size={13} />
@@ -232,10 +264,10 @@ export const PlaceDetail = () => {
                 </div>
               )}
 
-              {placeData.amenities?.length > 0 && (
+              {placeData.phone && (
                 <div className="meta-item">
-                  <Tag size={13} />
-                  <span><strong>Amenities:</strong> {placeData.amenities.join(', ')}</span>
+                  <Phone size={13} />
+                  <span><strong>Phone:</strong> {placeData.phone}</span>
                 </div>
               )}
 
@@ -252,13 +284,27 @@ export const PlaceDetail = () => {
                   </a>
                 </div>
               )}
+
+              {placeData.google_maps_uri && (
+                <div className="meta-item">
+                  <Navigation size={13} />
+                  <a
+                    href={placeData.google_maps_uri}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ color: 'var(--primary-green)', textDecoration: 'underline' }}
+                  >
+                    View on Google Maps
+                  </a>
+                </div>
+              )}
             </div>
 
             {/* Action Buttons */}
             <div className="place-detail-actions-row">
               <button
                 type="button"
-                className={`btn ${isSaved ? 'btn-secondary' : 'btn-secondary'}`}
+                className="btn btn-secondary"
                 onClick={handleToggleWishlist}
                 disabled={savingWishlist}
                 style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem' }}
@@ -285,16 +331,17 @@ export const PlaceDetail = () => {
       {placeData.lat && placeData.lon && (
         <div className="card" style={{ marginBottom: '2.5rem', padding: '1.75rem' }}>
           <div className="section-header" style={{ marginBottom: '1.25rem' }}>
-            <h3 style={{ fontSize: '1.35rem', margin: 0 }}>Location & Map</h3>
+            <h3 style={{ fontSize: '1.35rem', margin: 0 }}>Professional Map Location</h3>
             <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
               {placeData.lat.toFixed(4)}, {placeData.lon.toFixed(4)}
             </span>
           </div>
           <MapView
             places={[placeData, ...nearbyPlaces]}
-            center={[placeData.lat, placeData.lon]}
+            center={{ lat: placeData.lat, lng: placeData.lon }}
             zoom={14}
             height="380px"
+            selectedPlaceId={placeData.place_id}
           />
         </div>
       )}
@@ -304,7 +351,7 @@ export const PlaceDetail = () => {
         <div className="nearby-places-section" style={{ marginTop: '3rem' }}>
           <div className="section-header">
             <div>
-              <h2 className="section-title">Nearby Places & Experiences</h2>
+              <h2 className="section-title">Verified Nearby Places</h2>
               <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
                 Other notable sights, restaurants, and stays in this area.
               </p>

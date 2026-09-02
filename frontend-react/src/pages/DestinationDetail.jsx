@@ -18,7 +18,6 @@ import { exploreAPI, extractErrorMessage } from '../services/api';
 import { PlaceCard } from '../components/PlaceCard';
 import { MapView } from '../components/MapView';
 import { AddToTripModal } from '../components/AddToTripModal';
-import { Alert } from '../components/Alert';
 
 export const DestinationDetail = () => {
   const { destination } = useParams();
@@ -267,8 +266,8 @@ export const DestinationDetail = () => {
             places={activePlaces}
             center={
               destSummary.lat && destSummary.lon
-                ? [destSummary.lat, destSummary.lon]
-                : [15.2993, 74.1240]
+                ? { lat: destSummary.lat, lng: destSummary.lon }
+                : { lat: 17.3850, lng: 78.4867 }
             }
             height="440px"
           />

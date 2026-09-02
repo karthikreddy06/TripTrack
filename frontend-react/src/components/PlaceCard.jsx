@@ -6,12 +6,11 @@ import {
   Heart,
   Plus,
   ArrowUpRight,
-  Sparkles,
-  DollarSign,
   Utensils,
   Hotel,
   Landmark,
-  Compass
+  Compass,
+  CameraOff
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
@@ -38,12 +37,15 @@ export const PlaceCard = ({
   isWishlisted = false,
   onWishlistToggled,
   showRemoveButton = false,
-  onRemoveFromWishlist
+  onRemoveFromWishlist,
+  isActive = false,
+  onCardClick = null,
 }) => {
   const { isAuthenticated } = useAuth();
   const { showSuccess, showError } = useToast();
   const [saved, setSaved] = useState(isWishlisted);
   const [saving, setSaving] = useState(false);
+  const [imgError, setImgError] = useState(false);
 
   const handleToggleWishlist = async (e) => {
     e.preventDefault();
@@ -57,7 +59,6 @@ export const PlaceCard = ({
     try {
       setSaving(true);
       if (saved) {
-        // Find wishlist item ID and remove
         const check = await wishlistAPI.checkSaved(place.place_id);
         if (check.is_saved && check.wishlist_id) {
           await wishlistAPI.removeFromWishlist(check.wishlist_id);
@@ -71,7 +72,7 @@ export const PlaceCard = ({
           name: place.name,
           category: place.category,
           location: place.location,
-          image_url: place.image_url,
+          image_url: place.image_url || (place.photos && place.photos[0]) || null,
           rating: place.rating,
           description: place.description,
           metadata: {
@@ -80,13 +81,15 @@ export const PlaceCard = ({
             address: place.address,
             price_level: place.price_level,
             tags: place.tags,
+            review_count: place.review_count,
+            provider_place_id: place.provider_place_id || place.place_id
           },
         });
         setSaved(true);
         showSuccess(`Saved "${place.name}" to wishlist!`);
         if (onWishlistToggled) onWishlistToggled(place.place_id, true);
       }
-    } catch (err) {
+    } catch {
       showError('Failed to update wishlist. Please try again.');
     } finally {
       setSaving(false);
@@ -105,19 +108,29 @@ export const PlaceCard = ({
     ? `/explore/${encodeURIComponent(place.name.toLowerCase())}`
     : `/explore/place/${encodeURIComponent(place.place_id)}`;
 
+  const photoUrl = (!imgError && (place.image_url || (place.photos && place.photos.length > 0 ? place.photos[0] : null))) || null;
+
   return (
-    <div className="place-card card">
-      {/* Image / Banner */}
+    <div
+      className={`place-card card ${isActive ? 'active-map-card' : ''}`}
+      onClick={() => onCardClick && onCardClick(place)}
+    >
+      {/* Image Banner / Genuine Photo or Clean No-Photo Placeholder */}
       <div className="place-card-image-wrapper">
-        <img
-          src={
-            place.image_url ||
-            'https://images.unsplash.com/photo-1488646953014-85cb44e25828?auto=format&fit=crop&w=800&q=80'
-          }
-          alt={place.name}
-          className="place-card-image"
-          loading="lazy"
-        />
+        {photoUrl ? (
+          <img
+            src={photoUrl}
+            alt={place.name}
+            className="place-card-image"
+            loading="lazy"
+            onError={() => setImgError(true)}
+          />
+        ) : (
+          <div className="no-photo-placeholder">
+            <CameraOff size={24} className="no-photo-icon" />
+            <span className="no-photo-text">No verified photo available</span>
+          </div>
+        )}
 
         <div className="place-card-badge-row">
           <span className={`place-category-badge cat-${place.category?.toLowerCase()}`}>
@@ -129,6 +142,9 @@ export const PlaceCard = ({
             <span className="place-rating-badge">
               <Star size={11} fill="currentColor" />
               <span>{place.rating.toFixed(1)}</span>
+              {place.review_count > 0 && (
+                <span style={{ opacity: 0.8, fontSize: '0.65rem' }}>({place.review_count})</span>
+              )}
             </span>
           )}
         </div>
@@ -156,7 +172,7 @@ export const PlaceCard = ({
 
         <div className="place-card-location">
           <MapPin size={13} />
-          <span>{place.location}</span>
+          <span>{place.address || place.location}</span>
         </div>
 
         {place.description && (

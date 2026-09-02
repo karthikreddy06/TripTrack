@@ -1,5 +1,6 @@
 from typing import Optional, List
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Response, status
+from fastapi.responses import Response
 
 from app.schemas.explore import (
     ExploreSearchResponse,
@@ -8,6 +9,7 @@ from app.schemas.explore import (
     PlaceItem
 )
 from app.services.places_provider import places_provider, VERIFIED_DESTINATIONS
+from app.services.google_places_provider import google_places_provider, VERIFIED_REAL_PLACES
 
 router = APIRouter(prefix="/explore", tags=["Explore & Travel Discovery"])
 
@@ -19,6 +21,7 @@ async def get_featured_destinations():
     """
     featured = []
     for key, data in VERIFIED_DESTINATIONS.items():
+        places = [VERIFIED_REAL_PLACES[pid] for pid in data.get("place_ids", []) if pid in VERIFIED_REAL_PLACES]
         featured.append(
             DestinationSummary(
                 destination=data["destination"],
@@ -30,11 +33,11 @@ async def get_featured_destinations():
                 overview=data["overview"],
                 best_time_to_visit=data["best_time_to_visit"],
                 currency=data["currency"],
-                highlights=[PlaceItem(**p) for p in data["places"] if p["category"] in ["attraction", "activity"]],
-                hotels=[PlaceItem(**p) for p in data["places"] if p["category"] == "hotel"],
-                restaurants=[PlaceItem(**p) for p in data["places"] if p["category"] == "restaurant"],
-                attractions=[PlaceItem(**p) for p in data["places"] if p["category"] == "attraction"],
-                activities=[PlaceItem(**p) for p in data["places"] if p["category"] == "activity"],
+                highlights=[PlaceItem(**p) for p in places if p["category"] in ["attraction", "activity"]],
+                hotels=[PlaceItem(**p) for p in places if p["category"] == "hotel"],
+                restaurants=[PlaceItem(**p) for p in places if p["category"] == "restaurant"],
+                attractions=[PlaceItem(**p) for p in places if p["category"] == "attraction"],
+                activities=[PlaceItem(**p) for p in places if p["category"] == "activity"],
             )
         )
     return featured
@@ -73,10 +76,35 @@ async def get_destination(destination: str):
     return DestinationSummary(**dest_data)
 
 
+@router.get("/places/photo")
+async def get_place_photo(
+    photo_ref: str = Query(..., min_length=1, description="Google Places photo reference name"),
+    max_width: int = Query(1200, ge=100, le=2400)
+):
+    """
+    Proxy Google Places photo securely using backend credentials.
+    Returns cached image bytes with caching headers to eliminate client-side key exposure.
+    """
+    photo_bytes = await google_places_provider.get_photo_media(photo_ref=photo_ref, max_width=max_width)
+    if not photo_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Photo not found or Google Places API key not configured."
+        )
+
+    return Response(
+        content=photo_bytes,
+        media_type="image/jpeg",
+        headers={
+            "Cache-Control": "public, max-age=86400, immutable"
+        }
+    )
+
+
 @router.get("/places/{place_id}", response_model=PlaceDetailsResponse)
 async def get_place_details(place_id: str):
     """
-    Retrieve detailed information and nearby spots for a specific place.
+    Retrieve detailed information and nearby spots for a specific place using canonical Google Place ID.
     """
     place_info = await places_provider.get_place_by_id(place_id)
     if not place_info:

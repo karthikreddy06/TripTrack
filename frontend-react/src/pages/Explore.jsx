@@ -6,7 +6,6 @@ import {
   MapPin,
   Map,
   Grid,
-  Sparkles,
   ArrowUpRight,
   Hotel,
   Utensils,
@@ -30,29 +29,30 @@ const CATEGORIES = [
 ];
 
 const FEATURED_SHORTCUTS = [
-  { name: 'Goa', label: 'Goa, India', img: 'https://images.unsplash.com/photo-1512343879784-a960bf40e7f2?auto=format&fit=crop&w=400&q=80' },
-  { name: 'Hyderabad', label: 'Hyderabad, India', img: 'https://images.unsplash.com/photo-1605649487212-47bdab064df7?auto=format&fit=crop&w=400&q=80' },
-  { name: 'Dubai', label: 'Dubai, UAE', img: 'https://images.unsplash.com/photo-1512453979798-5ea266f8880c?auto=format&fit=crop&w=400&q=80' },
-  { name: 'Paris', label: 'Paris, France', img: 'https://images.unsplash.com/photo-1502602898657-3e91760cbb34?auto=format&fit=crop&w=400&q=80' },
+  { name: 'Hyderabad', label: 'Hyderabad, India', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/71/Charminar_Hyderabad_1.jpg/400px-Charminar_Hyderabad_1.jpg' },
+  { name: 'Goa', label: 'Goa, India', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/7b/Baga_Beach_North_Goa.jpg/400px-Baga_Beach_North_Goa.jpg' },
+  { name: 'Delhi', label: 'Delhi, India', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/09/India_Gate_in_New_Delhi_03-2016.jpg/400px-India_Gate_in_New_Delhi_03-2016.jpg' },
+  { name: 'Mumbai', label: 'Mumbai, India', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/3/3a/Mumbai_03-2016_30_Gateway_of_India.jpg/400px-Mumbai_03-2016_30_Gateway_of_India.jpg' },
+  { name: 'Paris', label: 'Paris, France', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/85/Tour_Eiffel_Wikimedia_Commons_%28cropped%29.jpg/400px-Tour_Eiffel_Wikimedia_Commons_%28cropped%29.jpg' },
 ];
 
 export const Explore = () => {
   const [searchParams, setSearchParams] = useSearchParams();
-  const initialQuery = searchParams.get('q') || 'Goa';
+  const initialQuery = searchParams.get('q') || 'Hyderabad';
   const initialCategory = searchParams.get('category') || 'all';
 
   const [searchQuery, setSearchQuery] = useState(initialQuery);
   const [activeCategory, setActiveCategory] = useState(initialCategory);
   const [searchResults, setSearchResults] = useState([]);
   const [destinationInfo, setDestinationInfo] = useState(null);
-  const [featuredDestinations, setFeaturedDestinations] = useState([]);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showMap, setShowMap] = useState(false);
+  const [selectedPlaceId, setSelectedPlaceId] = useState(null);
 
-  // Add to trip modal state
   const [modalPlace, setModalPlace] = useState(null);
+  const debounceTimerRef = useRef(null);
 
   const performSearch = useCallback(async (q, cat) => {
     if (!q.trim()) return;
@@ -62,6 +62,9 @@ export const Explore = () => {
       const data = await exploreAPI.search(q.trim(), cat);
       setSearchResults(data.results || []);
       setDestinationInfo(data.destination_info || null);
+      if (data.results && data.results.length > 0) {
+        setSelectedPlaceId(data.results[0].place_id);
+      }
     } catch (err) {
       setError(extractErrorMessage(err));
       setSearchResults([]);
@@ -70,17 +73,7 @@ export const Explore = () => {
     }
   }, []);
 
-  // Fetch initial featured list and perform search
   useEffect(() => {
-    const loadFeatured = async () => {
-      try {
-        const feat = await exploreAPI.getFeatured();
-        setFeaturedDestinations(Array.isArray(feat) ? feat : []);
-      } catch {
-        // Non-critical
-      }
-    };
-    loadFeatured();
     performSearch(initialQuery, initialCategory);
   }, [initialQuery, initialCategory, performSearch]);
 
@@ -104,6 +97,14 @@ export const Explore = () => {
     performSearch(destName, 'all');
   };
 
+  const handleSelectMapPlace = (place) => {
+    setSelectedPlaceId(place.place_id);
+    const el = document.getElementById(`place-card-${place.place_id}`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  };
+
   return (
     <div className="main-content explore-page-container">
       {/* Editorial Header & Hero Search */}
@@ -116,7 +117,7 @@ export const Explore = () => {
           <em>want to wander?</em>
         </h1>
         <p className="explore-hero-subtitle">
-          Search destinations, luxury hotels, authentic local dining, and iconic attractions worldwide.
+          Search destinations, luxury hotels, authentic local dining, and verified attractions with Google Places.
         </p>
 
         {/* Search Bar */}
@@ -125,7 +126,7 @@ export const Explore = () => {
           <input
             type="text"
             className="explore-search-input"
-            placeholder="Search destinations, hotels, restaurants, attractions... (e.g. Goa, Paris, Dubai)"
+            placeholder="Search destinations, hotels, restaurants, attractions... (e.g. Hyderabad, Goa, Paris, Delhi)"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
@@ -178,13 +179,13 @@ export const Explore = () => {
           onClick={() => setShowMap(!showMap)}
         >
           {showMap ? <Grid size={13} /> : <Map size={13} />}
-          <span>{showMap ? 'Hide Map' : 'View on Map'}</span>
+          <span>{showMap ? 'Hide Map' : 'View on Google Map'}</span>
         </button>
       </div>
 
       {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
 
-      {/* Destination Overview Box (When searching a destination) */}
+      {/* Destination Overview Box */}
       {destinationInfo && (
         <div className="card destination-overview-banner" style={{ marginBottom: '2rem' }}>
           <div className="dest-banner-grid">
@@ -237,7 +238,7 @@ export const Explore = () => {
         </div>
       )}
 
-      {/* Map Section (Collapsible) */}
+      {/* Interactive Google Map View Section */}
       {showMap && (
         <div className="explore-map-section" style={{ marginBottom: '2.5rem' }}>
           <div className="section-header" style={{ marginBottom: '1rem' }}>
@@ -252,12 +253,14 @@ export const Explore = () => {
             places={searchResults}
             center={
               destinationInfo?.lat && destinationInfo?.lon
-                ? [destinationInfo.lat, destinationInfo.lon]
+                ? { lat: destinationInfo.lat, lng: destinationInfo.lon }
                 : searchResults[0]?.lat
-                ? [searchResults[0].lat, searchResults[0].lon]
-                : [15.2993, 74.1240]
+                ? { lat: searchResults[0].lat, lng: searchResults[0].lon }
+                : { lat: 17.3850, lng: 78.4867 }
             }
-            height="440px"
+            height="460px"
+            selectedPlaceId={selectedPlaceId}
+            onSelectPlace={handleSelectMapPlace}
           />
         </div>
       )}
@@ -295,28 +298,31 @@ export const Explore = () => {
             <button
               type="button"
               className="btn btn-secondary"
-              onClick={() => handleShortcutClick('Goa')}
+              onClick={() => handleShortcutClick('Hyderabad')}
             >
               <RotateCcw size={13} />
-              <span>Explore Goa</span>
+              <span>Explore Hyderabad</span>
             </button>
             <button
               type="button"
               className="btn btn-primary"
-              onClick={() => handleShortcutClick('Dubai')}
+              onClick={() => handleShortcutClick('Goa')}
             >
-              <span>Explore Dubai</span>
+              <span>Explore Goa</span>
             </button>
           </div>
         </div>
       ) : (
         <div className="explore-places-grid">
           {searchResults.map((place) => (
-            <PlaceCard
-              key={place.place_id}
-              place={place}
-              onAddToTrip={(p) => setModalPlace(p)}
-            />
+            <div key={place.place_id} id={`place-card-${place.place_id}`}>
+              <PlaceCard
+                place={place}
+                isActive={selectedPlaceId === place.place_id}
+                onCardClick={(p) => setSelectedPlaceId(p.place_id)}
+                onAddToTrip={(p) => setModalPlace(p)}
+              />
+            </div>
           ))}
         </div>
       )}

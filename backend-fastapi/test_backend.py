@@ -278,42 +278,60 @@ def run_tests():
     print("Invalid token response:", res.status_code)
     assert res.status_code == 401, f"Expected 401 Unauthorized, got {res.status_code}"
 
-    # 14. Explore & Travel Discovery
-    print("\n[TEST 14] Testing Explore Discovery Endpoints...")
+    # 14. Explore & Travel Discovery (Google Places Canonical ID & Photo Consistency)
+    print("\n[TEST 14] Testing Explore Discovery Endpoints & Photo Consistency...")
     res = test_client.get("/explore/featured")
     print("Explore featured response:", res.status_code, "Count:", len(res.json()))
     assert res.status_code == 200
     assert len(res.json()) >= 1
 
+    # Search Hyderabad
+    res = test_client.get("/explore/search?q=hyderabad&category=all")
+    print("Explore search Hyderabad response:", res.status_code, "Results:", res.json().get("total_results"))
+    assert res.status_code == 200
+    assert res.json()["total_results"] > 0
+    results = res.json()["results"]
+    charminar = next((p for p in results if "Charminar" in p["name"]), None)
+    assert charminar is not None, "Charminar must be present in Hyderabad results"
+    assert charminar["place_id"] == "ChIJ4_0Q4s-byzsR6bI2J2N2N2A"
+    assert "Charminar" in charminar["image_url"], "Charminar must have its own verified photo"
+
     # Search Goa
     res = test_client.get("/explore/search?q=goa&category=all")
-    print("Explore search response:", res.status_code, "Results:", res.json().get("total_results"))
+    print("Explore search Goa response:", res.status_code, "Results:", res.json().get("total_results"))
     assert res.status_code == 200
     assert res.json()["total_results"] > 0
 
     # Destination details
-    res = test_client.get("/explore/destinations/goa")
+    res = test_client.get("/explore/destinations/hyderabad")
     print("Destination details response:", res.status_code, res.json().get("destination"))
     assert res.status_code == 200
-    assert res.json()["destination"] == "Goa"
+    assert res.json()["destination"] == "Hyderabad"
 
-    # Place details
-    res = test_client.get("/explore/places/goa-baga-beach")
+    # Place details for Charminar using canonical Google Place ID
+    res = test_client.get("/explore/places/ChIJ4_0Q4s-byzsR6bI2J2N2N2A")
     print("Place details response:", res.status_code, res.json()["place"]["name"])
     assert res.status_code == 200
-    assert res.json()["place"]["name"] == "Baga Beach"
+    assert res.json()["place"]["name"] == "Charminar"
+    assert res.json()["place"]["lat"] is not None
+    assert res.json()["place"]["lon"] is not None
+    assert len(res.json()["place"]["photos"]) > 0
 
-    # 15. Wishlist CRUD
-    print("\n[TEST 15] Testing Wishlist Operations...")
+    # 15. Wishlist CRUD with Canonical Google Place ID
+    print("\n[TEST 15] Testing Wishlist Operations with Canonical Place ID...")
     wishlist_item_1 = {
-        "place_id": "goa-baga-beach",
-        "name": "Baga Beach",
+        "place_id": "ChIJ4_0Q4s-byzsR6bI2J2N2N2A",
+        "name": "Charminar",
         "category": "attraction",
-        "location": "North Goa, Goa",
-        "image_url": "https://images.unsplash.com/photo-1512343879784-a960bf40e7f2?w=800",
-        "rating": 4.5,
-        "description": "Famous beach destination with water sports and shacks.",
-        "metadata": {"lat": 15.5553, "lon": 73.7517}
+        "location": "Hyderabad, Telangana, India",
+        "image_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/7/71/Charminar_Hyderabad_1.jpg/1200px-Charminar_Hyderabad_1.jpg",
+        "rating": 4.6,
+        "description": "Iconic 16th-century mosque with four grand arches.",
+        "metadata": {
+            "lat": 17.3615636,
+            "lon": 78.4746645,
+            "address": "Charminar Rd, Hyderabad, Telangana 500002"
+        }
     }
     res = test_client.post("/wishlist/", headers=auth_headers, json=wishlist_item_1)
     print("Add to wishlist response:", res.status_code, res.json().get("name"))
@@ -321,7 +339,7 @@ def run_tests():
     wishlist_id = res.json()["_id"]
 
     # Check place in wishlist
-    res = test_client.get("/wishlist/check/goa-baga-beach", headers=auth_headers)
+    res = test_client.get("/wishlist/check/ChIJ4_0Q4s-byzsR6bI2J2N2N2A", headers=auth_headers)
     print("Wishlist check response:", res.status_code, res.json())
     assert res.status_code == 200
     assert res.json()["is_saved"] is True
@@ -345,7 +363,7 @@ def run_tests():
     assert res.status_code == 200
 
     # Verify check returns false now
-    res = test_client.get("/wishlist/check/goa-baga-beach", headers=auth_headers)
+    res = test_client.get("/wishlist/check/ChIJ4_0Q4s-byzsR6bI2J2N2N2A", headers=auth_headers)
     assert res.json()["is_saved"] is False
 
     # 17. Cascade Deletion Check
