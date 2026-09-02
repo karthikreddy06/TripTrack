@@ -21,13 +21,16 @@ async def proxy_explore_photo(url: str = Query(..., description="Verified image 
     if not url or not (url.startswith("http://") or url.startswith("https://")):
         raise HTTPException(status_code=400, detail="Invalid image URL")
 
+    # If it's a Wikimedia Commons URL with query parameters, fetch it with authorized User-Agent
+    headers = {
+        "User-Agent": "TravelTrack-Discovery/3.0 (https://triptrack-frontend.onrender.com; info@triptrack.app)",
+        "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+        "Referer": "https://en.wikipedia.org/"
+    }
+
     try:
-        async with httpx.AsyncClient(timeout=8.0) as client:
-            res = await client.get(
-                url,
-                headers={"User-Agent": "TravelTrack-Discovery/3.0 (https://triptrack-frontend.onrender.com; info@triptrack.app)"},
-                follow_redirects=True
-            )
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+            res = await client.get(url, headers=headers)
             if res.status_code == 200:
                 content_type = res.headers.get("content-type", "image/jpeg")
                 return Response(

@@ -37,12 +37,12 @@ const CATEGORIES = [
 ];
 
 const FEATURED_SHORTCUTS = [
-  { name: 'Hyderabad', label: 'Hyderabad, India', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/71/Charminar_Hyderabad_1.jpg/800px-Charminar_Hyderabad_1.jpg' },
-  { name: 'Goa', label: 'Goa, India', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/7b/Baga_Beach_North_Goa.jpg/800px-Baga_Beach_North_Goa.jpg' },
-  { name: 'Bengaluru', label: 'Bengaluru, India', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/8f/Lalbagh_Glass_house_Bangalore.jpg/800px-Lalbagh_Glass_house_Bangalore.jpg' },
-  { name: 'Delhi', label: 'Delhi, India', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/09/India_Gate_in_New_Delhi_03-2016.jpg/800px-India_Gate_in_New_Delhi_03-2016.jpg' },
-  { name: 'Mumbai', label: 'Mumbai, India', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/d/df/Gateway_of_India_Mumbai_India.jpg/800px-Gateway_of_India_Mumbai_India.jpg' },
-  { name: 'Paris', label: 'Paris, France', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/a/a8/Tour_Eiffel_Wikimedia_Commons.jpg/800px-Tour_Eiffel_Wikimedia_Commons.jpg' },
+  { name: 'Hyderabad', label: 'Hyderabad, India', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/71/Charminar_Hyderabad_1.jpg/330px-Charminar_Hyderabad_1.jpg?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=thumbnail' },
+  { name: 'Goa', label: 'Goa, India', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/e/e9/Fort_Aguada_Goa.jpg/330px-Fort_Aguada_Goa.jpg?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=thumbnail' },
+  { name: 'Bengaluru', label: 'Bengaluru, India', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/d/d5/Glasshouse_and_fountain_at_lalbagh.jpg/330px-Glasshouse_and_fountain_at_lalbagh.jpg?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=thumbnail' },
+  { name: 'Delhi', label: 'Delhi, India', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/5/5b/India_Gate_in_the_Evening.jpg/330px-India_Gate_in_the_Evening.jpg?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=thumbnail' },
+  { name: 'Mumbai', label: 'Mumbai, India', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/3/3a/Mumbai_03-2016_30_Gateway_of_India.jpg/330px-Mumbai_03-2016_30_Gateway_of_India.jpg?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=thumbnail' },
+  { name: 'Paris', label: 'Paris, France', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/a/a8/Tour_Eiffel_Wikimedia_Commons.jpg/330px-Tour_Eiffel_Wikimedia_Commons.jpg?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=thumbnail' },
 ];
 
 export const Explore = () => {
