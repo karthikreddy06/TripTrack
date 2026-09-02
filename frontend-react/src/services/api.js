@@ -313,9 +313,9 @@ export const exploreAPI = {
     return response.data;
   },
 
-  search: async (query, category = 'all', limit = 30) => {
+  search: async (query, category = 'all', page = 1, limit = 24) => {
     const response = await apiClient.get('/explore/search', {
-      params: { q: query, category, limit },
+      params: { q: query, category, page, limit },
     });
     return response.data;
   },

@@ -10,11 +10,14 @@ import {
   Hotel,
   Landmark,
   Compass,
-  CameraOff
+  Coffee,
+  Trees,
+  Scroll
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { wishlistAPI, resolveImageUrl } from '../services/api';
+import { SafeImage } from './SafeImage';
 
 const getCategoryIcon = (category) => {
   switch (category?.toLowerCase()) {
@@ -22,8 +25,15 @@ const getCategoryIcon = (category) => {
       return <Hotel size={12} />;
     case 'restaurant':
       return <Utensils size={12} />;
+    case 'cafe':
+      return <Coffee size={12} />;
+    case 'museum':
     case 'attraction':
       return <Landmark size={12} />;
+    case 'park':
+      return <Trees size={12} />;
+    case 'historic':
+      return <Scroll size={12} />;
     case 'activity':
       return <Compass size={12} />;
     default:
@@ -45,7 +55,8 @@ export const PlaceCard = ({
   const { showSuccess, showError } = useToast();
   const [saved, setSaved] = useState(isWishlisted);
   const [saving, setSaving] = useState(false);
-  const [imgError, setImgError] = useState(false);
+
+  const placeId = place?.id || place?.place_id || place?.provider_id || '';
 
   const handleToggleWishlist = async (e) => {
     e.preventDefault();
@@ -59,35 +70,33 @@ export const PlaceCard = ({
     try {
       setSaving(true);
       if (saved) {
-        const check = await wishlistAPI.checkSaved(place.place_id);
+        const check = await wishlistAPI.checkSaved(placeId);
         if (check.is_saved && check.wishlist_id) {
           await wishlistAPI.removeFromWishlist(check.wishlist_id);
           setSaved(false);
           showSuccess(`Removed "${place.name}" from wishlist.`);
-          if (onWishlistToggled) onWishlistToggled(place.place_id, false);
+          if (onWishlistToggled) onWishlistToggled(placeId, false);
         }
       } else {
         await wishlistAPI.addToWishlist({
-          place_id: place.place_id,
+          place_id: placeId,
           name: place.name,
           category: place.category,
-          location: place.location,
-          image_url: place.image_url || (place.photos && place.photos[0]) || null,
-          rating: place.rating,
+          location: place.location || place.address,
+          image_url: place.image_verified ? place.image_url : null,
+          rating: place.rating || null,
           description: place.description,
           metadata: {
             lat: place.lat,
             lon: place.lon,
             address: place.address,
-            price_level: place.price_level,
             tags: place.tags,
-            review_count: place.review_count,
-            provider_place_id: place.provider_place_id || place.place_id
+            provider_id: place.provider_id || placeId
           },
         });
         setSaved(true);
         showSuccess(`Saved "${place.name}" to wishlist!`);
-        if (onWishlistToggled) onWishlistToggled(place.place_id, true);
+        if (onWishlistToggled) onWishlistToggled(placeId, true);
       }
     } catch {
       showError('Failed to update wishlist. Please try again.');
@@ -106,32 +115,26 @@ export const PlaceCard = ({
 
   const detailUrl = place.category === 'destination'
     ? `/explore/${encodeURIComponent(place.name.toLowerCase())}`
-    : `/explore/place/${encodeURIComponent(place.place_id)}`;
+    : `/explore/place/${encodeURIComponent(placeId)}`;
 
-  const rawPhoto = (!imgError && (place.image_url || (place.photos && place.photos.length > 0 ? place.photos[0] : null))) || null;
-  const photoUrl = resolveImageUrl(rawPhoto);
+  const photoUrl = resolveImageUrl(place.image_url || (place.photos && place.photos.length > 0 ? place.photos[0] : null));
+  const isVerified = Boolean(place.image_verified || (place.image_url && !place.image_url.includes('undefined')));
 
   return (
     <div
+      id={`place-card-${placeId}`}
       className={`place-card card ${isActive ? 'active-map-card' : ''}`}
       onClick={() => onCardClick && onCardClick(place)}
     >
-      {/* Image Banner / Genuine Photo or Clean No-Photo Placeholder */}
+      {/* Verified Photo or Tasteful No-Photo Botanical Placeholder */}
       <div className="place-card-image-wrapper">
-        {photoUrl ? (
-          <img
-            src={photoUrl}
-            alt={place.name}
-            className="place-card-image"
-            loading="lazy"
-            onError={() => setImgError(true)}
-          />
-        ) : (
-          <div className="no-photo-placeholder">
-            <CameraOff size={24} className="no-photo-icon" />
-            <span className="no-photo-text">No verified photo available</span>
-          </div>
-        )}
+        <SafeImage
+          src={photoUrl}
+          alt={place.name}
+          isVerified={isVerified}
+          className="place-card-image"
+          placeholderText="NO VERIFIED PHOTO AVAILABLE"
+        />
 
         <div className="place-card-badge-row">
           <span className={`place-category-badge cat-${place.category?.toLowerCase()}`}>
@@ -139,7 +142,7 @@ export const PlaceCard = ({
             <span>{place.category?.toUpperCase()}</span>
           </span>
 
-          {place.rating > 0 && (
+          {typeof place.rating === 'number' && place.rating > 0 && (
             <span className="place-rating-badge">
               <Star size={11} fill="currentColor" />
               <span>{place.rating.toFixed(1)}</span>
@@ -173,23 +176,17 @@ export const PlaceCard = ({
 
         <div className="place-card-location">
           <MapPin size={13} />
-          <span>{place.address || place.location}</span>
+          <span>{place.address || (typeof place.location === 'string' ? place.location : '')}</span>
         </div>
 
         {place.description && (
           <p className="place-card-description">{place.description}</p>
         )}
 
-        {/* Tags / Details */}
-        {(place.tags?.length > 0 || place.price_level || place.cuisine) && (
+        {/* Tags */}
+        {place.tags && place.tags.length > 0 && (
           <div className="place-card-tags">
-            {place.price_level && (
-              <span className="place-tag price-tag">{place.price_level}</span>
-            )}
-            {place.cuisine && (
-              <span className="place-tag">{place.cuisine}</span>
-            )}
-            {place.tags?.slice(0, 2).map((t, idx) => (
+            {place.tags.slice(0, 3).map((t, idx) => (
               <span key={idx} className="place-tag">
                 {t}
               </span>

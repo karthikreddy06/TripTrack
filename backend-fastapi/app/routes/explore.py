@@ -1,6 +1,5 @@
 from typing import Optional, List
-from fastapi import APIRouter, HTTPException, Query, Response, status
-from fastapi.responses import Response
+from fastapi import APIRouter, HTTPException, Query, status
 
 from app.schemas.explore import (
     ExploreSearchResponse,
@@ -8,10 +7,9 @@ from app.schemas.explore import (
     PlaceDetailsResponse,
     PlaceItem
 )
-from app.services.places_provider import places_provider
-from app.services.google_places_provider import google_places_provider
+from app.services.explore.provider import explore_provider
 
-router = APIRouter(prefix="/explore", tags=["Explore & Travel Discovery"])
+router = APIRouter(prefix="/explore", tags=["Explore & Travel Discovery (OpenStreetMap & Wikimedia)"])
 
 
 @router.get("/featured", response_model=List[DestinationSummary])
@@ -19,21 +17,34 @@ async def get_featured_destinations():
     """
     Retrieve curated featured destinations for the Explore landing page.
     """
-    featured = await places_provider.get_featured_destinations()
-    return [DestinationSummary(**d) for d in featured]
+    try:
+        featured = await explore_provider.get_featured_destinations()
+        return [DestinationSummary(**d) for d in featured]
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Unable to load featured destinations: {str(e)}"
+        )
 
 
 @router.get("/search", response_model=ExploreSearchResponse)
 async def search_explore(
     q: str = Query(..., min_length=1, max_length=100, description="Destination or place search query"),
-    category: str = Query("all", description="Filter category: all, destinations, hotels, restaurants, attractions, activities"),
-    limit: int = Query(30, ge=1, le=100, description="Max results to return")
+    category: str = Query("all", description="Filter category: all, attractions, hotels, restaurants, cafes, museums, parks, historic, activities"),
+    page: int = Query(1, ge=1, description="Page number for pagination"),
+    limit: int = Query(24, ge=1, le=100, description="Max results per page")
 ):
     """
-    Search for destinations, hotels, restaurants, attractions, and activities.
+    Search for places, attractions, dining, cafes, and stays via Nominatim, Overpass API, and Wikimedia.
+    No API keys, no Google, no Mapbox.
     """
     try:
-        results = await places_provider.search_places(query=q, category=category, limit=limit)
+        results = await explore_provider.search_places(
+            query=q,
+            category=category,
+            page=page,
+            limit=limit
+        )
         return ExploreSearchResponse(**results)
     except Exception as e:
         raise HTTPException(
@@ -47,85 +58,64 @@ async def get_destination(destination: str):
     """
     Retrieve full destination overview, highlights, hotels, restaurants, and attractions.
     """
-    dest_data = await places_provider.get_destination_details(destination)
+    dest_data = await explore_provider.get_destination_details(destination)
     if not dest_data:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Destination '{destination}' not found."
+            detail=f"Destination '{destination}' could not be located."
         )
     return DestinationSummary(**dest_data)
 
 
-@router.get("/places/photo")
-async def get_place_photo(
-    photo_ref: str = Query(..., min_length=1, description="Google Places photo reference name"),
-    max_width: int = Query(1200, ge=100, le=2400)
-):
-    """
-    Proxy Google Places photo securely using backend credentials.
-    Returns cached image bytes with caching headers to eliminate client-side key exposure.
-    """
-    photo_bytes = await google_places_provider.get_photo_media(photo_ref=photo_ref, max_width=max_width)
-    if not photo_bytes:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Photo not found or Google Places API key not configured."
-        )
-
-    return Response(
-        content=photo_bytes,
-        media_type="image/jpeg",
-        headers={
-            "Cache-Control": "public, max-age=86400, immutable"
-        }
-    )
-
-
 @router.get("/places/{place_id}", response_model=PlaceDetailsResponse)
-async def get_place_details(place_id: str):
+async def get_place(place_id: str):
     """
-    Retrieve detailed information and nearby spots for a specific place using canonical Google Place ID.
+    Retrieve full details for a place with coordinates, verified photo, and source attribution.
     """
-    place_info = await places_provider.get_place_by_id(place_id)
-    if not place_info:
+    place_data = await explore_provider.get_place_by_id(place_id)
+    if not place_data or not place_data.get("place"):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Place with ID '{place_id}' not found."
         )
-    return PlaceDetailsResponse(**place_info)
+
+    return PlaceDetailsResponse(
+        place=PlaceItem(**place_data["place"]),
+        nearby_places=[PlaceItem(**p) for p in place_data.get("nearby_places", [])]
+    )
 
 
-@router.get("/hotels", response_model=ExploreSearchResponse)
-async def get_hotels(
-    q: str = Query(..., min_length=1, description="Location to search hotels in"),
-    limit: int = Query(30, ge=1, le=100)
+@router.get("/hotels", response_model=List[PlaceItem])
+async def get_explore_hotels(
+    destination: str = Query("Hyderabad", description="City to discover hotels in"),
+    limit: int = Query(12, ge=1, le=50)
 ):
     """
-    Dedicated endpoint for hotel and accommodations discovery.
+    Direct endpoint for hotels in a destination.
     """
-    results = await places_provider.search_places(query=q, category="hotels", limit=limit)
-    return ExploreSearchResponse(**results)
+    res = await explore_provider.search_places(query=destination, category="hotels", limit=limit)
+    return [PlaceItem(**p) for p in res.get("places", [])]
 
 
-@router.get("/restaurants", response_model=ExploreSearchResponse)
-async def get_restaurants(
-    q: str = Query(..., min_length=1, description="Location to search dining in"),
-    limit: int = Query(30, ge=1, le=100)
+@router.get("/restaurants", response_model=List[PlaceItem])
+async def get_explore_restaurants(
+    destination: str = Query("Hyderabad", description="City to discover restaurants and cafes in"),
+    limit: int = Query(12, ge=1, le=50)
 ):
     """
-    Dedicated endpoint for restaurant and culinary discovery.
+    Direct endpoint for restaurants and dining in a destination.
     """
-    results = await places_provider.search_places(query=q, category="restaurants", limit=limit)
-    return ExploreSearchResponse(**results)
+    res = await explore_provider.search_places(query=destination, category="restaurants", limit=limit)
+    return [PlaceItem(**p) for p in res.get("places", [])]
 
 
-@router.get("/attractions", response_model=ExploreSearchResponse)
-async def get_attractions(
-    q: str = Query(..., min_length=1, description="Location to search sights in"),
-    limit: int = Query(30, ge=1, le=100)
+@router.get("/attractions", response_model=List[PlaceItem])
+async def get_explore_attractions(
+    destination: str = Query("Hyderabad", description="City to discover sights and attractions in"),
+    limit: int = Query(12, ge=1, le=50)
 ):
     """
-    Dedicated endpoint for attractions and activities discovery.
+    Direct endpoint for attractions and landmarks in a destination.
     """
-    results = await places_provider.search_places(query=q, category="attractions", limit=limit)
-    return ExploreSearchResponse(**results)
+    res = await explore_provider.search_places(query=destination, category="attractions", limit=limit)
+    return [PlaceItem(**p) for p in res.get("places", [])]

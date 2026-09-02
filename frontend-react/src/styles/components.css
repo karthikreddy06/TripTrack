@@ -2038,15 +2038,15 @@
   object-fit: cover;
 }
 
-/* Custom Google Maps Pins */
-.custom-google-pin {
+/* Custom OpenStreetMap Leaflet Pins */
+.custom-osm-pin,
+.custom-osm-div-icon {
   transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
-.custom-google-pin:hover,
-.custom-google-pin.active {
-  transform: rotate(-45deg) scale(1.22) !important;
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.38) !important;
+.custom-osm-pin:hover,
+.custom-osm-div-icon:hover {
+  transform: scale(1.15) !important;
   z-index: 999;
 }
 

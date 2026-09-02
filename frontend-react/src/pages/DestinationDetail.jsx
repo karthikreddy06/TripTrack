@@ -18,6 +18,7 @@ import { exploreAPI, resolveImageUrl, extractErrorMessage } from '../services/ap
 import { PlaceCard } from '../components/PlaceCard';
 import { MapView } from '../components/MapView';
 import { AddToTripModal } from '../components/AddToTripModal';
+import { SafeImage } from '../components/SafeImage';
 
 export const DestinationDetail = () => {
   const { destination } = useParams();
@@ -66,16 +67,19 @@ export const DestinationDetail = () => {
           ...(destSummary.attractions || []),
           ...(destSummary.hotels || []),
           ...(destSummary.restaurants || []),
-        ].filter((p, i, self) => i === self.findIndex((t) => t.place_id === p.place_id));
+        ].filter((p, i, self) => {
+          const pId = p.id || p.place_id || p.provider_id;
+          return i === self.findIndex((t) => (t.id || t.place_id || t.provider_id) === pId);
+        });
     }
   }, [destSummary, activeTab]);
 
   if (loading) {
     return (
       <div className="main-content">
-        <div className="loading-container" style={{ padding: '6rem 1rem' }}>
-          <div className="spinner spinner-lg" />
-          <p style={{ marginTop: '1rem' }}>Loading destination guide for {decodedDestination}...</p>
+        <div className="loading-container" style={{ padding: '6rem 1rem', textAlign: 'center' }}>
+          <div className="spinner" style={{ margin: '0 auto 1rem' }} />
+          <p style={{ color: 'var(--text-secondary)' }}>Loading destination guide for {decodedDestination}...</p>
         </div>
       </div>
     );
@@ -100,7 +104,7 @@ export const DestinationDetail = () => {
           <ArrowLeft size={14} />
           <span>Back to Explore</span>
         </Link>
-        <div className="card" style={{ textAlign: 'center', padding: '3rem 1.5rem' }}>
+        <div className="card" style={{ textAlign: 'center', padding: '3.5rem 1.5rem' }}>
           <Compass size={36} style={{ color: 'var(--accent)', margin: '0 auto 1rem' }} />
           <h2>Destination Guide Unavailable</h2>
           <p style={{ color: 'var(--text-secondary)', margin: '0.5rem 0 1.5rem' }}>
@@ -138,21 +142,16 @@ export const DestinationDetail = () => {
       {/* Destination Hero Header */}
       <div className="destination-hero-header card">
         <div className="dest-hero-grid">
-          {destSummary.image_url ? (
-            <img
+          <div style={{ maxWidth: '340px', width: '100%', height: '260px', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
+            <SafeImage
               src={resolveImageUrl(destSummary.image_url)}
               alt={destSummary.destination}
-              className="dest-hero-image"
-              loading="lazy"
-              onError={(e) => {
-                e.currentTarget.style.display = 'none';
-              }}
+              isVerified={Boolean(destSummary.image_url)}
+              placeholderText="DESTINATION GUIDE"
+              icon={Compass}
+              style={{ height: '100%' }}
             />
-          ) : (
-            <div className="dest-hero-placeholder" style={{ height: '260px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--surface)', borderRadius: 'var(--radius-lg)' }}>
-              <Compass size={40} style={{ color: 'var(--primary-green)' }} />
-            </div>
-          )}
+          </div>
 
           <div className="dest-hero-content">
             <div className="editorial-mark">
@@ -184,6 +183,9 @@ export const DestinationDetail = () => {
                   <span>Currency: {destSummary.currency}</span>
                 </div>
               )}
+              <div className="meta-pill">
+                <span>Source: OpenStreetMap &amp; Wikimedia</span>
+              </div>
             </div>
 
             <div className="dest-hero-actions" style={{ marginTop: '1.5rem', display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
@@ -234,7 +236,7 @@ export const DestinationDetail = () => {
             onClick={() => setActiveTab('hotels')}
           >
             <Hotel size={14} />
-            <span>Hotels & Stays ({destSummary.hotels?.length || 0})</span>
+            <span>Hotels &amp; Stays ({destSummary.hotels?.length || 0})</span>
           </button>
 
           <button
@@ -262,7 +264,7 @@ export const DestinationDetail = () => {
           onClick={() => setShowMap(!showMap)}
         >
           {showMap ? <Grid size={13} /> : <Map size={13} />}
-          <span>{showMap ? 'Hide Map' : 'View on Map'}</span>
+          <span>{showMap ? 'Hide Map' : 'Interactive Map'}</span>
         </button>
       </div>
 
@@ -273,8 +275,8 @@ export const DestinationDetail = () => {
             places={activePlaces}
             center={
               destSummary.lat && destSummary.lon
-                ? { lat: destSummary.lat, lng: destSummary.lon }
-                : { lat: 17.3850, lng: 78.4867 }
+                ? [destSummary.lat, destSummary.lon]
+                : [17.3850, 78.4867]
             }
             height="440px"
           />
@@ -282,32 +284,43 @@ export const DestinationDetail = () => {
       )}
 
       {/* Places Grid */}
-      {activePlaces.length === 0 ? (
-        <div className="empty-state">
-          <Compass size={24} style={{ color: 'var(--text-muted)' }} />
-          <h3>No places listed in this category yet.</h3>
-          <p className="empty-desc">
-            Explore other tabs or use the AI planner to suggest activities in {destSummary.destination}.
-          </p>
-        </div>
-      ) : (
-        <div className="explore-places-grid">
-          {activePlaces.map((place) => (
-            <PlaceCard
-              key={place.place_id}
-              place={place}
-              onAddToTrip={(p) => setModalPlace(p)}
-            />
-          ))}
-        </div>
-      )}
+      <div className="explore-results-section">
+        <h3 className="section-title" style={{ marginBottom: '1.5rem', textTransform: 'capitalize' }}>
+          {activeTab} in {destSummary.destination} ({activePlaces.length})
+        </h3>
 
-      {/* Add to Trip Modal */}
-      <AddToTripModal
-        isOpen={Boolean(modalPlace)}
-        onClose={() => setModalPlace(null)}
-        place={modalPlace}
-      />
+        {activePlaces.length === 0 ? (
+          <div className="card empty-state" style={{ textAlign: 'center', padding: '3.5rem 1.5rem' }}>
+            <Compass size={36} style={{ color: 'var(--accent)', margin: '0 auto 1rem' }} />
+            <h3>No {activeTab} listed yet</h3>
+            <p style={{ color: 'var(--text-secondary)', margin: '0.5rem 0' }}>
+              Check back soon as OpenStreetMap contributors catalog more places in this area.
+            </p>
+          </div>
+        ) : (
+          <div className="places-grid">
+            {activePlaces.map((place) => {
+              const pId = place.id || place.place_id || place.provider_id;
+              return (
+                <PlaceCard
+                  key={pId}
+                  place={place}
+                  onAddToTrip={(p) => setModalPlace(p)}
+                />
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Add To Trip Modal */}
+      {modalPlace && (
+        <AddToTripModal
+          place={modalPlace}
+          onClose={() => setModalPlace(null)}
+          onSuccess={() => {}}
+        />
+      )}
     </div>
   );
 };

@@ -9,8 +9,9 @@ import {
   Globe,
   Clock,
   Phone,
-  CameraOff,
-  Navigation
+  Compass,
+  Scroll,
+  ExternalLink
 } from 'lucide-react';
 import { exploreAPI, wishlistAPI, resolveImageUrl, extractErrorMessage } from '../services/api';
 import { useAuth } from '../context/AuthContext';
@@ -18,6 +19,7 @@ import { useToast } from '../context/ToastContext';
 import { PlaceCard } from '../components/PlaceCard';
 import { MapView } from '../components/MapView';
 import { AddToTripModal } from '../components/AddToTripModal';
+import { SafeImage } from '../components/SafeImage';
 
 export const PlaceDetail = () => {
   const { placeId } = useParams();
@@ -27,7 +29,6 @@ export const PlaceDetail = () => {
 
   const [placeData, setPlaceData] = useState(null);
   const [nearbyPlaces, setNearbyPlaces] = useState([]);
-  const [activePhotoIndex, setActivePhotoIndex] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -42,11 +43,10 @@ export const PlaceDetail = () => {
       const data = await exploreAPI.getPlaceDetails(decodedPlaceId);
       setPlaceData(data.place);
       setNearbyPlaces(data.nearby_places || []);
-      setActivePhotoIndex(0);
 
-      // Check wishlist status if authenticated
+      const pId = data.place?.id || data.place?.place_id || decodedPlaceId;
       if (isAuthenticated) {
-        const check = await wishlistAPI.checkSaved(decodedPlaceId);
+        const check = await wishlistAPI.checkSaved(pId);
         setIsSaved(check.is_saved);
       }
     } catch (err) {
@@ -66,10 +66,12 @@ export const PlaceDetail = () => {
       return;
     }
 
+    const pId = placeData.id || placeData.place_id || decodedPlaceId;
+
     try {
       setSavingWishlist(true);
       if (isSaved) {
-        const check = await wishlistAPI.checkSaved(placeData.place_id);
+        const check = await wishlistAPI.checkSaved(pId);
         if (check.is_saved && check.wishlist_id) {
           await wishlistAPI.removeFromWishlist(check.wishlist_id);
           setIsSaved(false);
@@ -77,21 +79,19 @@ export const PlaceDetail = () => {
         }
       } else {
         await wishlistAPI.addToWishlist({
-          place_id: placeData.place_id,
+          place_id: pId,
           name: placeData.name,
           category: placeData.category,
-          location: placeData.location,
-          image_url: placeData.image_url || (placeData.photos && placeData.photos[0]) || null,
-          rating: placeData.rating,
+          location: placeData.location || placeData.address,
+          image_url: placeData.image_verified ? placeData.image_url : null,
+          rating: placeData.rating || null,
           description: placeData.description,
           metadata: {
             lat: placeData.lat,
             lon: placeData.lon,
             address: placeData.address,
-            price_level: placeData.price_level,
             tags: placeData.tags,
-            review_count: placeData.review_count,
-            provider_place_id: placeData.provider_place_id || placeData.place_id
+            provider_id: placeData.provider_id || pId
           },
         });
         setIsSaved(true);
@@ -107,9 +107,9 @@ export const PlaceDetail = () => {
   if (loading) {
     return (
       <div className="main-content">
-        <div className="loading-container" style={{ padding: '6rem 1rem' }}>
-          <div className="spinner spinner-lg" />
-          <p style={{ marginTop: '1rem' }}>Loading verified place details...</p>
+        <div className="card" style={{ textAlign: 'center', padding: '4rem 1.5rem' }}>
+          <div className="spinner" style={{ margin: '0 auto 1rem' }} />
+          <p style={{ color: 'var(--text-secondary)' }}>Loading place details from OpenStreetMap...</p>
         </div>
       </div>
     );
@@ -134,31 +134,26 @@ export const PlaceDetail = () => {
           <ArrowLeft size={14} />
           <span>Back to Explore</span>
         </Link>
-        <div className="card" style={{ textAlign: 'center', padding: '3rem 1.5rem' }}>
-          <h2>Place Information Unavailable</h2>
+        <div className="card" style={{ textAlign: 'center', padding: '3.5rem 1.5rem' }}>
+          <Compass size={36} style={{ color: 'var(--accent)', margin: '0 auto 1rem' }} />
+          <h2>Place Details Unavailable</h2>
           <p style={{ color: 'var(--text-secondary)', margin: '0.5rem 0 1.5rem' }}>
-            {error || 'Unable to load place details.'}
+            {error || 'The requested place could not be located in OpenStreetMap.'}
           </p>
           <Link to="/explore" className="btn btn-primary">
-            Explore Places
+            Explore Other Destinations
           </Link>
         </div>
       </div>
     );
   }
 
-  const rawPhotos = placeData.photos && placeData.photos.length > 0
-    ? placeData.photos
-    : placeData.image_url
-    ? [placeData.image_url]
-    : [];
-
-  const photosList = rawPhotos.map(resolveImageUrl).filter(Boolean);
-  const currentPhoto = photosList[activePhotoIndex] || null;
+  const pId = placeData.id || placeData.place_id || decodedPlaceId;
+  const isVerified = Boolean(placeData.image_verified || placeData.image_url);
 
   return (
     <div className="main-content">
-      {/* Back Link */}
+      {/* Back button */}
       <Link
         to="/explore"
         style={{
@@ -178,102 +173,80 @@ export const PlaceDetail = () => {
       </Link>
 
       {/* Place Hero Card */}
-      <div className="card place-detail-hero" style={{ marginBottom: '2.5rem' }}>
-        <div className="place-detail-hero-grid">
-          {/* Photo Gallery Column */}
-          <div className="place-detail-gallery-col">
-            <div className="place-detail-hero-img-wrapper">
-              {currentPhoto ? (
-                <img
-                  src={currentPhoto}
-                  alt={placeData.name}
-                  className="place-detail-hero-img"
-                  loading="lazy"
-                />
-              ) : (
-                <div className="no-photo-placeholder" style={{ height: '380px', borderRadius: 'var(--radius-lg)' }}>
-                  <CameraOff size={36} className="no-photo-icon" />
-                  <span className="no-photo-text">No verified photo available from provider</span>
-                </div>
-              )}
-            </div>
-
-            {/* Thumbnail Strip */}
-            {photosList.length > 1 && (
-              <div className="place-detail-thumb-strip">
-                {photosList.map((photoUrl, idx) => (
-                  <button
-                    key={idx}
-                    type="button"
-                    className={`place-gallery-thumb-btn ${idx === activePhotoIndex ? 'active' : ''}`}
-                    onClick={() => setActivePhotoIndex(idx)}
-                  >
-                    <img
-                      src={photoUrl}
-                      alt={`${placeData.name} ${idx + 1}`}
-                      className="place-gallery-thumb-img"
-                    />
-                  </button>
-                ))}
-              </div>
-            )}
+      <div className="place-detail-hero card" style={{ marginBottom: '2.5rem' }}>
+        <div className="place-detail-grid">
+          {/* Main Photo / SafeImage placeholder */}
+          <div className="place-detail-photo-gallery" style={{ height: '340px', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
+            <SafeImage
+              src={resolveImageUrl(placeData.image_url)}
+              alt={placeData.name}
+              isVerified={isVerified}
+              placeholderText="NO VERIFIED PHOTO AVAILABLE"
+              style={{ height: '100%' }}
+            />
           </div>
 
-          {/* Place Content */}
-          <div className="place-detail-info-col">
+          {/* Place Details Content */}
+          <div className="place-detail-info">
             <div className="editorial-mark">
-              <i></i> 03 / PLACE DETAILS
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
-              <span className={`place-category-badge cat-${placeData.category?.toLowerCase()}`}>
-                <span>{placeData.category?.toUpperCase()}</span>
-              </span>
-
-              {placeData.rating > 0 && (
-                <span className="place-rating-badge">
-                  <Star size={11} fill="currentColor" />
-                  <span>{placeData.rating.toFixed(1)}</span>
-                  {placeData.review_count > 0 && (
-                    <span style={{ opacity: 0.8, fontSize: '0.65rem' }}>({placeData.review_count} reviews)</span>
-                  )}
-                </span>
-              )}
-
-              {placeData.price_level && (
-                <span className="place-tag price-tag">{placeData.price_level}</span>
-              )}
+              <i></i> {placeData.category?.toUpperCase() || 'PLACE'}
             </div>
 
             <h1 className="place-detail-title">{placeData.name}</h1>
 
-            <div className="place-detail-location-row">
+            <div className="place-detail-address">
               <MapPin size={14} />
-              <span>{placeData.address || placeData.location}</span>
+              <span>{placeData.address || placeData.location || 'Location details available'}</span>
             </div>
 
-            {placeData.description && (
-              <p className="place-detail-desc">{placeData.description}</p>
+            {/* Rating if available */}
+            {typeof placeData.rating === 'number' && placeData.rating > 0 && (
+              <div className="place-detail-rating-row" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.75rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '3px', color: '#d97706', fontWeight: 600, fontSize: '0.9rem' }}>
+                  <Star size={14} fill="currentColor" />
+                  <span>{placeData.rating.toFixed(1)}</span>
+                </div>
+                {placeData.review_count > 0 && (
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                    ({placeData.review_count} reviews)
+                  </span>
+                )}
+              </div>
             )}
 
-            {/* Metadata Grid */}
-            <div className="place-detail-meta-box">
+            <p className="place-detail-desc" style={{ marginTop: '1rem', lineHeight: '1.6' }}>
+              {placeData.description}
+            </p>
+
+            {/* Tags */}
+            {placeData.tags && placeData.tags.length > 0 && (
+              <div className="place-detail-tags" style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginTop: '1rem' }}>
+                {placeData.tags.map((tag, idx) => (
+                  <span key={idx} className="place-tag">
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {/* Meta Items & Provenance Links */}
+            <div className="place-detail-meta-box" style={{ marginTop: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
               {placeData.opening_hours && (
-                <div className="meta-item">
+                <div className="meta-item" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
                   <Clock size={13} />
                   <span><strong>Hours:</strong> {placeData.opening_hours}</span>
                 </div>
               )}
 
               {placeData.phone && (
-                <div className="meta-item">
+                <div className="meta-item" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
                   <Phone size={13} />
                   <span><strong>Phone:</strong> {placeData.phone}</span>
                 </div>
               )}
 
               {placeData.website && (
-                <div className="meta-item">
+                <div className="meta-item" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
                   <Globe size={13} />
                   <a
                     href={placeData.website}
@@ -286,23 +259,37 @@ export const PlaceDetail = () => {
                 </div>
               )}
 
-              {placeData.google_maps_uri && (
-                <div className="meta-item">
-                  <Navigation size={13} />
+              {placeData.wikipedia_url && (
+                <div className="meta-item" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
+                  <Scroll size={13} />
                   <a
-                    href={placeData.google_maps_uri}
+                    href={placeData.wikipedia_url}
                     target="_blank"
                     rel="noopener noreferrer"
                     style={{ color: 'var(--primary-green)', textDecoration: 'underline' }}
                   >
-                    View on Google Maps
+                    Wikipedia Article
+                  </a>
+                </div>
+              )}
+
+              {placeData.source?.source_url && (
+                <div className="meta-item" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
+                  <ExternalLink size={13} />
+                  <a
+                    href={placeData.source.source_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ color: 'var(--text-secondary)', textDecoration: 'underline' }}
+                  >
+                    OpenStreetMap Provenance
                   </a>
                 </div>
               )}
             </div>
 
             {/* Action Buttons */}
-            <div className="place-detail-actions-row">
+            <div className="place-detail-actions-row" style={{ marginTop: '1.75rem', display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
               <button
                 type="button"
                 className="btn btn-secondary"
@@ -331,8 +318,8 @@ export const PlaceDetail = () => {
       {/* Map & Location Section */}
       {placeData.lat && placeData.lon && (
         <div className="card" style={{ marginBottom: '2.5rem', padding: '1.75rem' }}>
-          <div className="section-header" style={{ marginBottom: '1.25rem' }}>
-            <h3 style={{ fontSize: '1.35rem', margin: 0 }}>Professional Map Location</h3>
+          <div className="section-header" style={{ marginBottom: '1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h3 style={{ fontSize: '1.35rem', margin: 0 }}>OpenStreetMap Location</h3>
             <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
               {placeData.lat.toFixed(4)}, {placeData.lon.toFixed(4)}
             </span>
@@ -342,7 +329,7 @@ export const PlaceDetail = () => {
             center={{ lat: placeData.lat, lng: placeData.lon }}
             zoom={14}
             height="380px"
-            selectedPlaceId={placeData.place_id}
+            selectedPlaceId={pId}
           />
         </div>
       )}
@@ -350,33 +337,38 @@ export const PlaceDetail = () => {
       {/* Nearby Places Section */}
       {nearbyPlaces.length > 0 && (
         <div className="nearby-places-section" style={{ marginTop: '3rem' }}>
-          <div className="section-header">
+          <div className="section-header" style={{ marginBottom: '1.25rem' }}>
             <div>
               <h2 className="section-title">Verified Nearby Places</h2>
               <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-                Other notable sights, restaurants, and stays in this area.
+                Other notable sights, restaurants, and stays discovered in this area.
               </p>
             </div>
           </div>
 
-          <div className="explore-places-grid">
-            {nearbyPlaces.map((nearby) => (
-              <PlaceCard
-                key={nearby.place_id}
-                place={nearby}
-                onAddToTrip={(p) => setModalPlace(p)}
-              />
-            ))}
+          <div className="places-grid">
+            {nearbyPlaces.map((nearby) => {
+              const nId = nearby.id || nearby.place_id || nearby.provider_id;
+              return (
+                <PlaceCard
+                  key={nId}
+                  place={nearby}
+                  onAddToTrip={(p) => setModalPlace(p)}
+                />
+              );
+            })}
           </div>
         </div>
       )}
 
       {/* Add to Trip Modal */}
-      <AddToTripModal
-        isOpen={Boolean(modalPlace)}
-        onClose={() => setModalPlace(null)}
-        place={modalPlace}
-      />
+      {modalPlace && (
+        <AddToTripModal
+          place={modalPlace}
+          onClose={() => setModalPlace(null)}
+          onSuccess={() => {}}
+        />
+      )}
     </div>
   );
 };

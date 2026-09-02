@@ -1,13 +1,17 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import mapboxgl from 'mapbox-gl';
-import 'mapbox-gl/dist/mapbox-gl.css';
-import { MapPin, Navigation, Compass, AlertCircle } from 'lucide-react';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
+import { MapPin, Compass } from 'lucide-react';
 
 const CATEGORY_COLORS = {
   hotel: '#244B7A',
   restaurant: '#A03E1C',
+  cafe: '#C05621',
   activity: '#61402B',
   attraction: '#2C3E2D',
+  museum: '#4338CA',
+  park: '#15803D',
+  historic: '#78350F',
   destination: '#1F2B20',
 };
 
@@ -16,8 +20,8 @@ const getCategoryColor = (category) => {
 };
 
 const getValidCoordinates = (place) => {
-  const lat = place?.lat ?? place?.latitude;
-  const lon = place?.lon ?? place?.longitude ?? place?.lng;
+  const lat = place?.lat ?? place?.latitude ?? place?.location?.lat;
+  const lon = place?.lon ?? place?.longitude ?? place?.lng ?? place?.location?.lon;
   if (typeof lat === 'number' && typeof lon === 'number' && !isNaN(lat) && !isNaN(lon)) {
     return { lat, lon };
   }
@@ -34,51 +38,45 @@ export const MapView = ({
 }) => {
   const mapContainerRef = useRef(null);
   const mapInstanceRef = useRef(null);
-  const markersRef = useRef([]);
-  const popupRef = useRef(null);
+  const markersLayerRef = useRef(null);
+  const markersMapRef = useRef(new Map());
 
   const [mapError, setMapError] = useState(null);
-  const [tokenMissing, setTokenMissing] = useState(false);
 
-  const mapboxToken = (import.meta.env.VITE_MAPBOX_ACCESS_TOKEN || '').trim();
-
-  // Initialize Mapbox instance
+  // Initialize Leaflet Map Instance
   useEffect(() => {
-    if (!mapboxToken) {
-      setTokenMissing(true);
-      return;
-    }
-
-    setTokenMissing(false);
-    mapboxgl.accessToken = mapboxToken;
-
-    const initialCenter = Array.isArray(center)
-      ? [center[1], center[0]]
-      : [center.lng ?? center.lon ?? 78.4867, center.lat ?? 17.3850];
+    if (!mapContainerRef.current) return;
 
     try {
-      const map = new mapboxgl.Map({
-        container: mapContainerRef.current,
-        style: 'mapbox://styles/mapbox/light-v11',
-        center: initialCenter,
+      const initialLat = Array.isArray(center) ? center[0] : (center?.lat ?? 17.3850);
+      const initialLng = Array.isArray(center) ? center[1] : (center?.lng ?? center?.lon ?? 78.4867);
+
+      // Create Map
+      const map = L.map(mapContainerRef.current, {
+        center: [initialLat, initialLng],
         zoom: zoom,
-        attributionControl: false,
+        zoomControl: true,
+        attributionControl: true,
       });
 
-      // Add navigation controls
-      map.addControl(new mapboxgl.NavigationControl({ showCompass: true }), 'top-right');
-      map.addControl(new mapboxgl.AttributionControl({ compact: true }), 'bottom-right');
+      // OpenStreetMap Tile Layer
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      }).addTo(map);
 
+      // Layer group to hold markers
+      const markersLayer = L.layerGroup().addTo(map);
+      markersLayerRef.current = markersLayer;
       mapInstanceRef.current = map;
       setMapError(null);
 
-      map.on('error', (e) => {
-        if (e && e.error && e.error.status === 401) {
-          setMapError('Invalid Mapbox access token. Please check VITE_MAPBOX_ACCESS_TOKEN.');
-        }
-      });
+      // Leaflet resize fix after container mount
+      setTimeout(() => {
+        map.invalidateSize();
+      }, 250);
     } catch (err) {
-      setMapError(err.message || 'Failed to initialize Mapbox');
+      setMapError(err.message || 'Failed to initialize OpenStreetMap');
     }
 
     return () => {
@@ -87,21 +85,16 @@ export const MapView = ({
         mapInstanceRef.current = null;
       }
     };
-  }, [mapboxToken, zoom]);
+  }, []);
 
-  // Update Markers & Bounds whenever places change
+  // Update Markers when places change
   const updateMarkers = useCallback(() => {
     const map = mapInstanceRef.current;
-    if (!map) return;
+    const markersLayer = markersLayerRef.current;
+    if (!map || !markersLayer) return;
 
-    // Clear previous markers
-    markersRef.current.forEach((m) => m.remove());
-    markersRef.current = [];
-
-    if (popupRef.current) {
-      popupRef.current.remove();
-      popupRef.current = null;
-    }
+    markersLayer.clearLayers();
+    markersMapRef.current.clear();
 
     const validPlaces = places
       .map((p) => ({ place: p, coords: getValidCoordinates(p) }))
@@ -109,37 +102,47 @@ export const MapView = ({
 
     if (validPlaces.length === 0) return;
 
-    const bounds = new mapboxgl.LngLatBounds();
+    const bounds = L.latLngBounds();
 
     validPlaces.forEach(({ place, coords }, idx) => {
-      const isSelected = selectedPlaceId && (place.place_id === selectedPlaceId || place.provider_place_id === selectedPlaceId);
+      const pId = place.id || place.place_id || place.provider_id || String(idx);
+      const isSelected = selectedPlaceId && (place.id === selectedPlaceId || place.place_id === selectedPlaceId);
       const catColor = getCategoryColor(place.category);
 
-      // Create Custom DOM Element for Marker
-      const el = document.createElement('div');
-      el.className = `mapbox-custom-marker ${isSelected ? 'selected' : ''}`;
-      el.style.cssText = `
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: ${isSelected ? '36px' : '28px'};
-        height: ${isSelected ? '36px' : '28px'};
-        background-color: ${isSelected ? 'var(--primary-green, #2C3E2D)' : catColor};
-        color: #ffffff;
-        border-radius: 50%;
-        border: 2px solid #ffffff;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.22);
-        cursor: pointer;
-        font-family: var(--font-mono, monospace);
-        font-size: ${isSelected ? '12px' : '10px'};
-        font-weight: 700;
-        transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s ease;
-      `;
-      el.innerText = `${idx + 1}`;
+      // Custom Leaflet DivIcon
+      const customIcon = L.divIcon({
+        className: 'custom-osm-div-icon',
+        html: `
+          <div style="
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: ${isSelected ? '34px' : '26px'};
+            height: ${isSelected ? '34px' : '26px'};
+            background-color: ${isSelected ? '#1f2b20' : catColor};
+            color: #ffffff;
+            border-radius: 50%;
+            border: 2px solid #ffffff;
+            box-shadow: 0 3px 8px rgba(0,0,0,0.3);
+            font-family: var(--font-mono, monospace);
+            font-size: ${isSelected ? '11px' : '9px'};
+            font-weight: 700;
+            cursor: pointer;
+            transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+          ">
+            ${idx + 1}
+          </div>
+        `,
+        iconSize: [isSelected ? 34 : 26, isSelected ? 34 : 26],
+        iconAnchor: [isSelected ? 17 : 13, isSelected ? 17 : 13],
+        popupAnchor: [0, isSelected ? -18 : -14],
+      });
 
-      // Create Popup
+      const marker = L.marker([coords.lat, coords.lon], { icon: customIcon });
+
+      // Popup Content
       const popupHtml = `
-        <div style="font-family: inherit; padding: 4px; max-width: 220px;">
+        <div style="font-family: inherit; padding: 2px; max-width: 220px;">
           <span style="font-size: 9px; text-transform: uppercase; font-weight: 700; color: ${catColor}; letter-spacing: 0.05em;">
             ${place.category?.toUpperCase() || 'PLACE'}
           </span>
@@ -149,39 +152,32 @@ export const MapView = ({
           <p style="margin: 0; font-size: 11px; color: #64748b; line-height: 1.3;">
             ${place.address || place.location || ''}
           </p>
-          ${place.rating ? `<div style="margin-top: 4px; font-size: 11px; font-weight: 600; color: #d97706;">★ ${Number(place.rating).toFixed(1)}</div>` : ''}
         </div>
       `;
 
-      const popup = new mapboxgl.Popup({ offset: 25, closeButton: false }).setHTML(popupHtml);
+      marker.bindPopup(popupHtml, { closeButton: false, offset: [0, -10] });
 
-      const marker = new mapboxgl.Marker(el)
-        .setLngLat([coords.lon, coords.lat])
-        .setPopup(popup)
-        .addTo(map);
-
-      el.addEventListener('click', (e) => {
-        e.stopPropagation();
+      marker.on('click', () => {
         if (onSelectPlace) {
           onSelectPlace(place);
         }
       });
 
-      markersRef.current.push(marker);
-      bounds.extend([coords.lon, coords.lat]);
+      markersLayer.addLayer(marker);
+      markersMapRef.current.set(pId, marker);
+      bounds.extend([coords.lat, coords.lon]);
 
       if (isSelected) {
-        popupRef.current = popup;
-        marker.togglePopup();
+        marker.openPopup();
       }
     });
 
-    // Fit map to markers bounds
-    if (!bounds.isEmpty()) {
+    // Fit map bounds
+    if (bounds.isValid()) {
       map.fitBounds(bounds, {
-        padding: { top: 60, bottom: 60, left: 60, right: 60 },
+        padding: [50, 50],
         maxZoom: 15,
-        duration: 1000,
+        animate: true,
       });
     }
   }, [places, selectedPlaceId, onSelectPlace]);
@@ -190,26 +186,30 @@ export const MapView = ({
     updateMarkers();
   }, [updateMarkers]);
 
-  // Focus selected place when selectedPlaceId changes
+  // Selected Place focus effect
   useEffect(() => {
     if (!selectedPlaceId || !mapInstanceRef.current) return;
 
     const target = places.find(
-      (p) => p.place_id === selectedPlaceId || p.provider_place_id === selectedPlaceId
+      (p) => p.id === selectedPlaceId || p.place_id === selectedPlaceId || p.provider_id === selectedPlaceId
     );
     const coords = getValidCoordinates(target);
 
     if (coords) {
-      mapInstanceRef.current.flyTo({
-        center: [coords.lon, coords.lat],
-        zoom: Math.max(mapInstanceRef.current.getZoom(), 14),
-        essential: true,
-        duration: 1200,
+      mapInstanceRef.current.setView([coords.lat, coords.lon], Math.max(mapInstanceRef.current.getZoom(), 14), {
+        animate: true,
+        duration: 0.8,
       });
+
+      const pId = target.id || target.place_id || target.provider_id;
+      const marker = markersMapRef.current.get(pId);
+      if (marker) {
+        marker.openPopup();
+      }
     }
   }, [selectedPlaceId, places]);
 
-  if (tokenMissing || mapError) {
+  if (mapError) {
     return (
       <div
         className="map-view-container card map-fallback-container"
@@ -221,36 +221,21 @@ export const MapView = ({
           justifyContent: 'center',
           padding: '2rem',
           textAlign: 'center',
-          background: 'linear-gradient(135deg, #f5f6f2 0%, #ebeee7 100%)',
+          background: 'var(--surface, #f8f9f6)',
           border: '1px solid var(--border)',
           borderRadius: 'var(--radius-lg)',
         }}
       >
-        <div
-          style={{
-            width: '48px',
-            height: '48px',
-            borderRadius: '50%',
-            backgroundColor: '#ffffff',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.06)',
-            marginBottom: '1rem',
-            color: 'var(--primary-green)',
-          }}
-        >
-          <Compass size={24} />
-        </div>
-        <h4 style={{ fontSize: '1.15rem', marginBottom: '0.4rem', color: 'var(--text-main)' }}>
-          Interactive Map
+        <Compass size={36} style={{ color: 'var(--primary-green)', marginBottom: '0.75rem' }} />
+        <h4 style={{ fontSize: '1.1rem', marginBottom: '0.4rem', color: 'var(--text-main)' }}>
+          OpenStreetMap View
         </h4>
-        <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', maxWidth: '360px', margin: 0 }}>
-          {mapError ? mapError : 'Map temporarily unavailable. To enable live map exploration, configure VITE_MAPBOX_ACCESS_TOKEN.'}
+        <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', maxWidth: '340px', margin: 0 }}>
+          Map tiles could not be rendered at this moment. Place cards and itinerary builders remain fully functional.
         </p>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '1rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginTop: '0.75rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
           <MapPin size={12} />
-          <span>{places.length} verified coordinate markers ready</span>
+          <span>{places.length} verified coordinates available</span>
         </div>
       </div>
     );
@@ -266,12 +251,13 @@ export const MapView = ({
         borderRadius: 'var(--radius-lg)',
         overflow: 'hidden',
         border: '1px solid var(--border)',
+        zIndex: 1,
       }}
     >
       <div
         ref={mapContainerRef}
         style={{ width: '100%', height: '100%' }}
-        className="mapbox-gl-map-container"
+        className="leaflet-map-container"
       />
     </div>
   );
