@@ -42,8 +42,27 @@ def create_activity(
 ):
     """
     Add a day-by-day itinerary activity to an existing trip owned by the user.
+    Prevents duplicate entries on the same day while persisting verified place metadata in MongoDB.
     """
     verify_trip_ownership(activity.trip_id, current_user_id)
+
+    # Duplicate check: check if the same activity is already scheduled on this day
+    existing_act = itineraries_collection.find_one({
+        "trip_id": activity.trip_id,
+        "day_number": activity.day_number,
+        "title": activity.title.strip()
+    })
+
+    if existing_act:
+        return {
+            "message": f"'{activity.title}' is already scheduled for Day {activity.day_number} of this trip.",
+            "activity_id": str(existing_act["_id"]),
+            "trip_id": activity.trip_id,
+            "title": activity.title.strip(),
+            "day_number": activity.day_number,
+            "date": activity.date,
+            "already_exists": True
+        }
 
     activity_data = activity.model_dump()
     activity_data["user_id"] = current_user_id
@@ -58,7 +77,12 @@ def create_activity(
 
     return {
         "message": "Activity created successfully",
-        "activity_id": str(result.inserted_id)
+        "activity_id": str(result.inserted_id),
+        "trip_id": activity.trip_id,
+        "title": activity.title.strip(),
+        "day_number": activity.day_number,
+        "date": activity.date,
+        "already_exists": False
     }
 
 

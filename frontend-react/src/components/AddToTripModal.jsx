@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Plus,
@@ -6,11 +6,42 @@ import {
   X,
   MapPin,
   ArrowUpRight,
-  Luggage
+  Luggage,
+  Clock,
+  Calendar,
+  DollarSign,
+  CameraOff
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { tripsAPI, itineraryAPI, extractErrorMessage } from '../services/api';
+
+const calculateIsoDateForDay = (startDateStr, dayNum) => {
+  if (!startDateStr) return new Date().toISOString().split('T')[0];
+  try {
+    const parts = startDateStr.split('-').map(Number);
+    if (parts.length !== 3 || parts.some(isNaN)) return startDateStr;
+    const [y, m, d] = parts;
+    const target = new Date(y, m - 1, d + (dayNum - 1));
+    const targetY = target.getFullYear();
+    const targetM = String(target.getMonth() + 1).padStart(2, '0');
+    const targetD = String(target.getDate()).padStart(2, '0');
+    return `${targetY}-${targetM}-${targetD}`;
+  } catch {
+    return startDateStr;
+  }
+};
+
+const formatReadableDate = (dateStr) => {
+  if (!dateStr) return '';
+  try {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const dt = new Date(y, m - 1, d);
+    return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  } catch {
+    return dateStr;
+  }
+};
 
 export const AddToTripModal = ({ isOpen, onClose, place }) => {
   const { user } = useAuth();
@@ -34,10 +65,13 @@ export const AddToTripModal = ({ isOpen, onClose, place }) => {
         const list = Array.isArray(data) ? data : [];
         setTrips(list);
 
-        // Pre-select trip matching destination if available
         if (list.length > 0) {
           const matching = place?.location
-            ? list.find((t) => place.location.toLowerCase().includes(t.destination.toLowerCase()) || t.destination.toLowerCase().includes(place.location.toLowerCase()))
+            ? list.find(
+                (t) =>
+                  place.location.toLowerCase().includes(t.destination.toLowerCase()) ||
+                  t.destination.toLowerCase().includes(place.location.toLowerCase())
+              )
             : null;
           setSelectedTripId(matching ? matching._id : list[0]._id);
         }
@@ -49,43 +83,72 @@ export const AddToTripModal = ({ isOpen, onClose, place }) => {
     };
 
     fetchUserTrips();
-  }, [isOpen, user?.user_id, place?.location]);
-
-  if (!isOpen || !place) return null;
+  }, [isOpen, user?.user_id, place?.location, showError]);
 
   const selectedTrip = trips.find((t) => t._id === selectedTripId);
+
+  // Compute available days for the selected trip
+  const tripDayOptions = useMemo(() => {
+    if (!selectedTrip?.start_date || !selectedTrip?.end_date) {
+      return [{ dayNum: 1, dateStr: new Date().toISOString().split('T')[0] }];
+    }
+    try {
+      const [y1, m1, d1] = selectedTrip.start_date.split('-').map(Number);
+      const [y2, m2, d2] = selectedTrip.end_date.split('-').map(Number);
+      const start = new Date(y1, m1 - 1, d1);
+      const end = new Date(y2, m2 - 1, d2);
+      const diffTime = Math.max(0, end - start);
+      const totalDays = Math.min(Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1, 30);
+
+      const options = [];
+      for (let i = 1; i <= totalDays; i++) {
+        options.push({
+          dayNum: i,
+          dateStr: calculateIsoDateForDay(selectedTrip.start_date, i),
+        });
+      }
+      return options;
+    } catch {
+      return [{ dayNum: 1, dateStr: selectedTrip.start_date }];
+    }
+  }, [selectedTrip]);
+
+  if (!isOpen || !place) return null;
 
   const handleAdd = async (e) => {
     e.preventDefault();
     if (!selectedTripId) {
-      showError('Please select an existing trip or create a new one first.');
+      showError('Please select a trip or create a new one first.');
       return;
     }
 
     try {
       setSubmitting(true);
 
-      // Determine date from trip start date + day number
-      let activityDate = selectedTrip?.start_date || new Date().toISOString().split('T')[0];
-      if (selectedTrip?.start_date && dayNumber > 1) {
-        const start = new Date(selectedTrip.start_date);
-        start.setDate(start.getDate() + (dayNumber - 1));
-        activityDate = start.toISOString().split('T')[0];
-      }
+      const chosenDayNum = parseInt(dayNumber, 10) || 1;
+      const activityDate = calculateIsoDateForDay(selectedTrip?.start_date, chosenDayNum);
 
-      await itineraryAPI.createActivity({
+      const res = await itineraryAPI.createActivity({
         trip_id: selectedTripId,
-        day_number: parseInt(dayNumber, 10) || 1,
+        day_number: chosenDayNum,
         date: activityDate,
         time: timeSlot || '10:00 AM',
-        title: place.name,
-        location: place.address || place.location,
-        description: place.description || `${place.category.toUpperCase()} in ${place.location}`,
+        title: place.name ? place.name.trim().slice(0, 150) : 'Discovered Place',
+        location: (place.address || place.location || '').slice(0, 250),
+        description: (place.description || `${place.category?.toUpperCase() || 'PLACE'} in ${place.location || ''}`).slice(0, 900),
         cost: estimatedCost ? parseFloat(estimatedCost) : 0,
-        notes: `Discovered on TravelTrack Explore (${place.category})`,
+        notes: place.category ? `Discovered on TravelTrack Explore (${place.category})` : '',
+        place_id: place.place_id || place.provider_place_id || null,
+        category: place.category || null,
+        image_url: place.image_url || (place.photos && place.photos[0]) || null,
       });
 
-      showSuccess(`Added "${place.name}" to ${selectedTrip.title || selectedTrip.destination}!`);
+      if (res.already_exists) {
+        showSuccess(`"${place.name}" is already scheduled for Day ${chosenDayNum} in ${selectedTrip.title || selectedTrip.destination}.`);
+      } else {
+        showSuccess(`Added "${place.name}" to ${selectedTrip.title || selectedTrip.destination}!`);
+      }
+
       setAddedSuccessTrip(selectedTrip);
     } catch (err) {
       showError(extractErrorMessage(err));
@@ -98,6 +161,8 @@ export const AddToTripModal = ({ isOpen, onClose, place }) => {
     setAddedSuccessTrip(null);
     onClose();
   };
+
+  const placeImg = place.image_url || (place.photos && place.photos.length > 0 ? place.photos[0] : null);
 
   return (
     <div className="modal-backdrop" onClick={handleClose}>
@@ -145,13 +210,17 @@ export const AddToTripModal = ({ isOpen, onClose, place }) => {
 
             {/* Place summary banner */}
             <div className="modal-place-banner">
-              {place.image_url && (
+              {placeImg ? (
                 <img
-                  src={place.image_url}
+                  src={placeImg}
                   alt={place.name}
                   className="modal-place-thumb"
                   loading="lazy"
                 />
+              ) : (
+                <div className="modal-place-thumb" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--surface)', border: '1px solid var(--border)' }}>
+                  <CameraOff size={18} style={{ color: 'var(--text-muted)' }} />
+                </div>
               )}
               <div>
                 <span className="category-tag-badge" style={{ marginBottom: '0.2rem' }}>
@@ -160,7 +229,7 @@ export const AddToTripModal = ({ isOpen, onClose, place }) => {
                 <h4 style={{ margin: 0, fontSize: '1.1rem' }}>{place.name}</h4>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.775rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
                   <MapPin size={11} />
-                  <span>{place.location}</span>
+                  <span>{place.address || place.location}</span>
                 </div>
               </div>
             </div>
@@ -192,12 +261,15 @@ export const AddToTripModal = ({ isOpen, onClose, place }) => {
                     id="select-trip"
                     className="form-select"
                     value={selectedTripId}
-                    onChange={(e) => setSelectedTripId(e.target.value)}
+                    onChange={(e) => {
+                      setSelectedTripId(e.target.value);
+                      setDayNumber(1);
+                    }}
                     required
                   >
                     {trips.map((t) => (
                       <option key={t._id} value={t._id}>
-                        {t.title || t.destination} ({t.start_date} — {t.end_date}) [{t.status}]
+                        {t.title || t.destination} ({t.start_date} — {t.end_date}) [{t.status?.toUpperCase()}]
                       </option>
                     ))}
                   </select>
@@ -206,21 +278,26 @@ export const AddToTripModal = ({ isOpen, onClose, place }) => {
                 <div className="form-grid-two">
                   <div className="form-group">
                     <label className="form-label" htmlFor="day-num">
-                      ITINERARY DAY
+                      <Calendar size={12} style={{ display: 'inline', marginRight: '4px' }} />
+                      SCHEDULE DAY
                     </label>
-                    <input
+                    <select
                       id="day-num"
-                      type="number"
-                      min="1"
-                      max="30"
-                      className="form-input"
+                      className="form-select"
                       value={dayNumber}
-                      onChange={(e) => setDayNumber(e.target.value)}
-                    />
+                      onChange={(e) => setDayNumber(parseInt(e.target.value, 10))}
+                    >
+                      {tripDayOptions.map((opt) => (
+                        <option key={opt.dayNum} value={opt.dayNum}>
+                          Day {opt.dayNum} ({formatReadableDate(opt.dateStr)})
+                        </option>
+                      ))}
+                    </select>
                   </div>
 
                   <div className="form-group">
                     <label className="form-label" htmlFor="time-slot">
+                      <Clock size={12} style={{ display: 'inline', marginRight: '4px' }} />
                       TIME / SCHEDULE
                     </label>
                     <input
@@ -236,6 +313,7 @@ export const AddToTripModal = ({ isOpen, onClose, place }) => {
 
                 <div className="form-group">
                   <label className="form-label" htmlFor="est-cost">
+                    <DollarSign size={12} style={{ display: 'inline', marginRight: '4px' }} />
                     ESTIMATED EXPENSE (USD)
                   </label>
                   <input
@@ -255,7 +333,7 @@ export const AddToTripModal = ({ isOpen, onClose, place }) => {
                     Cancel
                   </button>
                   <button type="submit" className="btn btn-primary" disabled={submitting}>
-                    {submitting ? 'Adding...' : 'Add to Trip'}
+                    {submitting ? 'Persisting to Trip...' : 'Add to Trip'}
                   </button>
                 </div>
               </form>

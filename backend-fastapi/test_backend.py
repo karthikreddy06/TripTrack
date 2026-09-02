@@ -366,8 +366,114 @@ def run_tests():
     res = test_client.get("/wishlist/check/ChIJ4_0Q4s-byzsR6bI2J2N2N2A", headers=auth_headers)
     assert res.json()["is_saved"] is False
 
-    # 17. Cascade Deletion Check
-    print("\n[TEST 17] Testing Cascade Cleanup on Trip Delete...")
+    # 17. Explore -> Add to Trip Flow and Itinerary Persistence
+    print("\n[TEST 17] Testing Explore -> Add to Trip Flow and Itinerary Persistence...")
+    # Create Hyderabad trip
+    hyd_trip_data = {
+        "user_id": user_id,
+        "destination": "Hyderabad, India",
+        "title": "Hyderabad Heritage Tour",
+        "start_date": "2026-11-10",
+        "end_date": "2026-11-15",
+        "status": "planned",
+        "budget": 2500.0,
+        "description": "Visiting Charminar, Golconda, and historic sights",
+        "travelers": 2
+    }
+    res = test_client.post("/trips/", headers=auth_headers, json=hyd_trip_data)
+    assert res.status_code == 201
+    hyd_trip_id = res.json()["trip_id"]
+
+    # 1. Add Charminar to Day 1
+    charminar_payload = {
+        "trip_id": hyd_trip_id,
+        "day_number": 1,
+        "date": "2026-11-10",
+        "time": "10:00 AM",
+        "title": "Charminar",
+        "location": "Charminar Rd, Char Kaman, Ghansi Bazaar, Hyderabad 500002",
+        "description": "Iconic 16th-century mosque with four grand arches.",
+        "cost": 50.0,
+        "notes": "Discovered on TravelTrack Explore (attraction)",
+        "place_id": "ChIJ4_0Q4s-byzsR6bI2J2N2N2A",
+        "category": "attraction",
+        "image_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/7/71/Charminar_Hyderabad_1.jpg/1200px-Charminar_Hyderabad_1.jpg"
+    }
+    res = test_client.post("/itinerary/", headers=auth_headers, json=charminar_payload)
+    print("Add Charminar response:", res.status_code, res.json())
+    assert res.status_code == 201
+    assert res.json()["title"] == "Charminar"
+    assert res.json()["already_exists"] is False
+    charminar_act_id = res.json()["activity_id"]
+
+    # 2. Add Golconda Fort to Day 2
+    golconda_payload = {
+        "trip_id": hyd_trip_id,
+        "day_number": 2,
+        "date": "2026-11-11",
+        "time": "02:00 PM",
+        "title": "Golconda Fort",
+        "location": "Ibrahim Bagh, Hyderabad 500008",
+        "description": "Medieval citadel famous for acoustic architecture.",
+        "cost": 30.0,
+        "notes": "Discovered on TravelTrack Explore (attraction)",
+        "place_id": "ChIJ9wZ1y-aZyzsR6Wq2kH8YhZQ",
+        "category": "attraction"
+    }
+    res = test_client.post("/itinerary/", headers=auth_headers, json=golconda_payload)
+    print("Add Golconda Fort response:", res.status_code, res.json())
+    assert res.status_code == 201
+    assert res.json()["title"] == "Golconda Fort"
+
+    # 3. Add Ramoji Film City to Day 3
+    ramoji_payload = {
+        "trip_id": hyd_trip_id,
+        "day_number": 3,
+        "date": "2026-11-12",
+        "time": "09:00 AM",
+        "title": "Ramoji Film City",
+        "location": "Hayathnagar, Hyderabad 501512",
+        "description": "World's largest integrated film studio complex.",
+        "cost": 120.0,
+        "notes": "Discovered on TravelTrack Explore (activity)",
+        "place_id": "ChIJ19L8vYqXyzsR2Z9eY1Lq-xA",
+        "category": "activity"
+    }
+    res = test_client.post("/itinerary/", headers=auth_headers, json=ramoji_payload)
+    print("Add Ramoji Film City response:", res.status_code, res.json())
+    assert res.status_code == 201
+    assert res.json()["title"] == "Ramoji Film City"
+
+    # 4. Duplicate addition test on Day 1
+    res = test_client.post("/itinerary/", headers=auth_headers, json=charminar_payload)
+    print("Duplicate Charminar response:", res.status_code, res.json())
+    assert res.status_code == 201
+    assert res.json()["already_exists"] is True
+
+    # 5. Fetch trip activities and verify all 3 exist in MongoDB
+    res = test_client.get(f"/itinerary/trip/{hyd_trip_id}", headers=auth_headers)
+    print("Get trip itinerary response:", res.status_code, "Count:", len(res.json()))
+    assert res.status_code == 200
+    activities = res.json()
+    assert len(activities) == 3
+    act_titles = [a["title"] for a in activities]
+    assert "Charminar" in act_titles
+    assert "Golconda Fort" in act_titles
+    assert "Ramoji Film City" in act_titles
+
+    # 6. Verify unauthorized attempt on this trip
+    res = test_client.post(
+        "/itinerary/",
+        headers={"Authorization": "Bearer invalid_token"},
+        json=charminar_payload
+    )
+    assert res.status_code == 401
+
+    # Cleanup Hyderabad trip & activities
+    test_client.delete(f"/trips/{hyd_trip_id}", headers=auth_headers)
+
+    # 18. Cascade Deletion Check
+    print("\n[TEST 18] Testing Cascade Cleanup on Trip Delete...")
     res = test_client.delete(f"/trips/{trip_id}", headers=auth_headers)
     print("Delete trip response:", res.status_code, res.json())
     assert res.status_code == 200
@@ -385,7 +491,7 @@ def run_tests():
     print("Cleaned up test user.")
 
     print("\n==================================================")
-    print("ALL 17 BACKEND TESTS PASSED SUCCESSFULLY!")
+    print("ALL 18 BACKEND TESTS PASSED SUCCESSFULLY!")
     print("==================================================")
 
 if __name__ == "__main__":
