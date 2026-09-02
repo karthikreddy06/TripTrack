@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { MapPin, Compass } from 'lucide-react';
+import { Compass } from 'lucide-react';
 
 const CATEGORY_COLORS = {
   hotel: '#244B7A',
@@ -51,30 +51,45 @@ export const MapView = ({
       const initialLat = Array.isArray(center) ? center[0] : (center?.lat ?? 17.3850);
       const initialLng = Array.isArray(center) ? center[1] : (center?.lng ?? center?.lon ?? 78.4867);
 
-      // Create Map
-      const map = L.map(mapContainerRef.current, {
-        center: [initialLat, initialLng],
-        zoom: zoom,
-        zoomControl: true,
-        attributionControl: true,
+      if (!mapInstanceRef.current) {
+        const map = L.map(mapContainerRef.current, {
+          center: [initialLat, initialLng],
+          zoom: zoom,
+          zoomControl: true,
+          attributionControl: true,
+        });
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom: 19,
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors',
+        }).addTo(map);
+
+        const markersLayer = L.layerGroup().addTo(map);
+        markersLayerRef.current = markersLayer;
+        mapInstanceRef.current = map;
+        setMapError(null);
+      }
+
+      // ResizeObserver to handle tab switches and container resizes
+      const resizeObserver = new ResizeObserver(() => {
+        if (mapInstanceRef.current) {
+          mapInstanceRef.current.invalidateSize();
+        }
       });
 
-      // OpenStreetMap Tile Layer
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        maxZoom: 19,
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-      }).addTo(map);
+      if (mapContainerRef.current) {
+        resizeObserver.observe(mapContainerRef.current);
+      }
 
-      // Layer group to hold markers
-      const markersLayer = L.layerGroup().addTo(map);
-      markersLayerRef.current = markersLayer;
-      mapInstanceRef.current = map;
-      setMapError(null);
-
-      // Leaflet resize fix after container mount
       setTimeout(() => {
-        map.invalidateSize();
-      }, 250);
+        if (mapInstanceRef.current) {
+          mapInstanceRef.current.invalidateSize();
+        }
+      }, 200);
+
+      return () => {
+        resizeObserver.disconnect();
+      };
     } catch (err) {
       setMapError(err.message || 'Failed to initialize OpenStreetMap');
     }
@@ -106,10 +121,9 @@ export const MapView = ({
 
     validPlaces.forEach(({ place, coords }, idx) => {
       const pId = place.id || place.place_id || place.provider_id || String(idx);
-      const isSelected = selectedPlaceId && (place.id === selectedPlaceId || place.place_id === selectedPlaceId);
+      const isSelected = selectedPlaceId && (place.id === selectedPlaceId || place.place_id === selectedPlaceId || place.provider_id === selectedPlaceId);
       const catColor = getCategoryColor(place.category);
 
-      // Custom Leaflet DivIcon
       const customIcon = L.divIcon({
         className: 'custom-osm-div-icon',
         html: `
@@ -117,13 +131,13 @@ export const MapView = ({
             display: flex;
             align-items: center;
             justify-content: center;
-            width: ${isSelected ? '34px' : '26px'};
-            height: ${isSelected ? '34px' : '26px'};
+            width: ${isSelected ? '32px' : '26px'};
+            height: ${isSelected ? '32px' : '26px'};
             background-color: ${isSelected ? '#1f2b20' : catColor};
             color: #ffffff;
             border-radius: 50%;
             border: 2px solid #ffffff;
-            box-shadow: 0 3px 8px rgba(0,0,0,0.3);
+            box-shadow: 0 3px 8px rgba(0,0,0,0.35);
             font-family: var(--font-mono, monospace);
             font-size: ${isSelected ? '11px' : '9px'};
             font-weight: 700;
@@ -133,14 +147,13 @@ export const MapView = ({
             ${idx + 1}
           </div>
         `,
-        iconSize: [isSelected ? 34 : 26, isSelected ? 34 : 26],
-        iconAnchor: [isSelected ? 17 : 13, isSelected ? 17 : 13],
-        popupAnchor: [0, isSelected ? -18 : -14],
+        iconSize: [isSelected ? 32 : 26, isSelected ? 32 : 26],
+        iconAnchor: [isSelected ? 16 : 13, isSelected ? 16 : 13],
+        popupAnchor: [0, isSelected ? -16 : -13],
       });
 
       const marker = L.marker([coords.lat, coords.lon], { icon: customIcon });
 
-      // Popup Content
       const popupHtml = `
         <div style="font-family: inherit; padding: 2px; max-width: 220px;">
           <span style="font-size: 9px; text-transform: uppercase; font-weight: 700; color: ${catColor}; letter-spacing: 0.05em;">
@@ -172,10 +185,9 @@ export const MapView = ({
       }
     });
 
-    // Fit map bounds
     if (bounds.isValid()) {
       map.fitBounds(bounds, {
-        padding: [50, 50],
+        padding: [45, 45],
         maxZoom: 15,
         animate: true,
       });
@@ -219,45 +231,41 @@ export const MapView = ({
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
-          padding: '2rem',
           textAlign: 'center',
-          background: 'var(--surface, #f8f9f6)',
-          border: '1px solid var(--border)',
-          borderRadius: 'var(--radius-lg)',
+          padding: '2rem',
+          background: 'var(--surface)',
         }}
       >
-        <Compass size={36} style={{ color: 'var(--primary-green)', marginBottom: '0.75rem' }} />
-        <h4 style={{ fontSize: '1.1rem', marginBottom: '0.4rem', color: 'var(--text-main)' }}>
-          OpenStreetMap View
-        </h4>
-        <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', maxWidth: '340px', margin: 0 }}>
-          Map tiles could not be rendered at this moment. Place cards and itinerary builders remain fully functional.
+        <Compass size={32} style={{ color: 'var(--accent)', marginBottom: '0.75rem' }} />
+        <h4 style={{ fontSize: '1.1rem', margin: '0 0 0.5rem 0' }}>OpenStreetMap Preview</h4>
+        <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', maxWidth: '380px', margin: 0 }}>
+          {mapError}
         </p>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginTop: '0.75rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-          <MapPin size={12} />
-          <span>{places.length} verified coordinates available</span>
-        </div>
       </div>
     );
   }
 
   return (
     <div
-      className="map-view-wrapper"
+      className="map-view-container card"
       style={{
-        height: height,
-        width: '100%',
         position: 'relative',
-        borderRadius: 'var(--radius-lg)',
+        height: height,
+        minHeight: '380px',
+        width: '100%',
+        borderRadius: 'var(--radius-md)',
         overflow: 'hidden',
-        border: '1px solid var(--border)',
-        zIndex: 1,
+        border: '1px solid var(--border-light)',
       }}
     >
       <div
         ref={mapContainerRef}
-        style={{ width: '100%', height: '100%' }}
-        className="leaflet-map-container"
+        style={{
+          width: '100%',
+          height: '100%',
+          minHeight: '380px',
+          background: '#f8f9f6',
+        }}
       />
     </div>
   );

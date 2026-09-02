@@ -5,8 +5,8 @@ import axios from 'axios';
 // In local development, VITE_API_URL defaults to 'http://127.0.0.1:8000'.
 export const getBaseUrl = () => {
   const envUrl = import.meta.env.VITE_API_URL;
-  if (envUrl) {
-    return envUrl.replace(/\/+$/, '');
+  if (envUrl && envUrl.trim()) {
+    return envUrl.trim().replace(/\/+$/, '');
   }
   if (typeof window !== 'undefined' && window.location.hostname.includes('onrender.com')) {
     return 'https://triptrack-backend.onrender.com';
@@ -18,10 +18,14 @@ export const API_BASE_URL = getBaseUrl();
 
 export const resolveImageUrl = (url) => {
   if (!url) return null;
+  const base = getBaseUrl();
+  // Proxy Wikimedia images through the backend proxy to prevent 403 hotlink blocks
+  if (url.includes('upload.wikimedia.org') || url.includes('wikimedia.org')) {
+    return `${base}/explore/photo?url=${encodeURIComponent(url)}`;
+  }
   if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) {
     return url;
   }
-  const base = getBaseUrl();
   return `${base}${url.startsWith('/') ? '' : '/'}${url}`;
 };
 
@@ -30,12 +34,13 @@ const apiClient = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
-  timeout: 15000,
+  timeout: 30000,
 });
 
-// Request interceptor to attach JWT Bearer token
+// Request interceptor to attach JWT Bearer token and dynamic baseURL
 apiClient.interceptors.request.use(
   (config) => {
+    config.baseURL = getBaseUrl();
     const token = localStorage.getItem('traveltrack_token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;

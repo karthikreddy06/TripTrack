@@ -1,5 +1,6 @@
+import httpx
 from typing import Optional, List
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Response, status
 
 from app.schemas.explore import (
     ExploreSearchResponse,
@@ -10,6 +11,37 @@ from app.schemas.explore import (
 from app.services.explore.provider import explore_provider
 
 router = APIRouter(prefix="/explore", tags=["Explore & Travel Discovery (OpenStreetMap & Wikimedia)"])
+
+
+@router.get("/photo")
+async def proxy_explore_photo(url: str = Query(..., description="Verified image URL to proxy")):
+    """
+    Proxy endpoint for Wikimedia / OpenStreetMap verified images to prevent 403 hotlink blocks.
+    """
+    if not url or not (url.startswith("http://") or url.startswith("https://")):
+        raise HTTPException(status_code=400, detail="Invalid image URL")
+
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            res = await client.get(
+                url,
+                headers={"User-Agent": "TravelTrack-Discovery/3.0 (https://triptrack-frontend.onrender.com; info@triptrack.app)"},
+                follow_redirects=True
+            )
+            if res.status_code == 200:
+                content_type = res.headers.get("content-type", "image/jpeg")
+                return Response(
+                    content=res.content,
+                    media_type=content_type,
+                    headers={
+                        "Cache-Control": "public, max-age=604800, immutable",
+                        "Access-Control-Allow-Origin": "*"
+                    }
+                )
+    except Exception:
+        pass
+
+    raise HTTPException(status_code=404, detail="Photo could not be retrieved")
 
 
 @router.get("/featured", response_model=List[DestinationSummary])

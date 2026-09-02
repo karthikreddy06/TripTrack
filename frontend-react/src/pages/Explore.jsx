@@ -17,7 +17,7 @@ import {
   Scroll,
   ChevronDown
 } from 'lucide-react';
-import { exploreAPI, extractErrorMessage } from '../services/api';
+import { exploreAPI, resolveImageUrl, extractErrorMessage } from '../services/api';
 import { PlaceCard } from '../components/PlaceCard';
 import { MapView } from '../components/MapView';
 import { AddToTripModal } from '../components/AddToTripModal';
@@ -37,12 +37,12 @@ const CATEGORIES = [
 ];
 
 const FEATURED_SHORTCUTS = [
-  { name: 'Hyderabad', label: 'Hyderabad, India', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/71/Charminar_Hyderabad_1.jpg/400px-Charminar_Hyderabad_1.jpg' },
-  { name: 'Goa', label: 'Goa, India', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/7b/Baga_Beach_North_Goa.jpg/400px-Baga_Beach_North_Goa.jpg' },
-  { name: 'Bengaluru', label: 'Bengaluru, India', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/8f/Lalbagh_Glass_house_Bangalore.jpg/400px-Lalbagh_Glass_house_Bangalore.jpg' },
-  { name: 'Delhi', label: 'Delhi, India', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/09/India_Gate_in_New_Delhi_03-2016.jpg/400px-India_Gate_in_New_Delhi_03-2016.jpg' },
-  { name: 'Mumbai', label: 'Mumbai, India', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/d/df/Gateway_of_India_Mumbai_India.jpg/400px-Gateway_of_India_Mumbai_India.jpg' },
-  { name: 'Paris', label: 'Paris, France', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/a/a8/Tour_Eiffel_Wikimedia_Commons.jpg/400px-Tour_Eiffel_Wikimedia_Commons.jpg' },
+  { name: 'Hyderabad', label: 'Hyderabad, India', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/71/Charminar_Hyderabad_1.jpg/800px-Charminar_Hyderabad_1.jpg' },
+  { name: 'Goa', label: 'Goa, India', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/7b/Baga_Beach_North_Goa.jpg/800px-Baga_Beach_North_Goa.jpg' },
+  { name: 'Bengaluru', label: 'Bengaluru, India', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/8f/Lalbagh_Glass_house_Bangalore.jpg/800px-Lalbagh_Glass_house_Bangalore.jpg' },
+  { name: 'Delhi', label: 'Delhi, India', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/09/India_Gate_in_New_Delhi_03-2016.jpg/800px-India_Gate_in_New_Delhi_03-2016.jpg' },
+  { name: 'Mumbai', label: 'Mumbai, India', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/d/df/Gateway_of_India_Mumbai_India.jpg/800px-Gateway_of_India_Mumbai_India.jpg' },
+  { name: 'Paris', label: 'Paris, France', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/a/a8/Tour_Eiffel_Wikimedia_Commons.jpg/800px-Tour_Eiffel_Wikimedia_Commons.jpg' },
 ];
 
 export const Explore = () => {
@@ -214,7 +214,14 @@ export const Explore = () => {
               className={`shortcut-pill ${searchQuery.toLowerCase() === sc.name.toLowerCase() ? 'active' : ''}`}
               onClick={() => handleShortcutClick(sc.name)}
             >
-              <img src={sc.img} alt={sc.name} className="shortcut-thumb" />
+              <img
+                src={resolveImageUrl(sc.img)}
+                alt={sc.name}
+                className="shortcut-thumb"
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none';
+                }}
+              />
               <span>{sc.name}</span>
             </button>
           ))}
@@ -259,7 +266,7 @@ export const Explore = () => {
           <div className="dest-banner-grid">
             <div style={{ maxWidth: '320px', width: '100%', height: '200px', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
               <SafeImage
-                src={destinationInfo.image_url}
+                src={resolveImageUrl(destinationInfo.image_url)}
                 alt={destinationInfo.destination}
                 isVerified={Boolean(destinationInfo.image_url)}
                 placeholderText="DESTINATION GUIDE"
@@ -317,7 +324,11 @@ export const Explore = () => {
         <div className="explore-map-container" style={{ marginBottom: '2.5rem' }}>
           <MapView
             places={searchResults}
-            center={destinationInfo ? [destinationInfo.lat, destinationInfo.lon] : [17.3850, 78.4867]}
+            center={
+              destinationInfo?.lat && destinationInfo?.lon
+                ? [destinationInfo.lat, destinationInfo.lon]
+                : [17.3850, 78.4867]
+            }
             zoom={12}
             height="460px"
             selectedPlaceId={selectedPlaceId}

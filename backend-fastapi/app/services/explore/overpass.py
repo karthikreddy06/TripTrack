@@ -1,119 +1,162 @@
+import asyncio
 import time
-import urllib.parse
 from typing import Dict, List, Optional, Any
 import httpx
 
-# In-memory cache for Overpass API query results (TTL: 12 hours)
-_OVERPASS_CACHE: Dict[str, Dict[str, Any]] = {}
-OVERPASS_CACHE_TTL = 43200
-
-# Public Overpass mirror endpoints with automatic failover
+# Public Overpass API mirrors
 OVERPASS_ENDPOINTS = [
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
-    "https://maps.mail.ru/osm/tools/overpass/api/interpreter"
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
 ]
+
+# Category mapping from OpenStreetMap tags to canonical Explore categories
+OSM_CATEGORY_MAP = {
+    # Attractions
+    "attraction": "attraction",
+    "viewpoint": "attraction",
+    "monument": "historic",
+    "memorial": "historic",
+    "castle": "historic",
+    "fort": "historic",
+    "ruins": "historic",
+    "palace": "historic",
+    "archaeological_site": "historic",
+    "heritage": "historic",
+    "artwork": "attraction",
+    "theme_park": "activity",
+    "zoo": "activity",
+    "aquarium": "activity",
+    # Museums
+    "museum": "museum",
+    "gallery": "museum",
+    # Stays / Accommodations
+    "hotel": "hotel",
+    "hostel": "hotel",
+    "guest_house": "hotel",
+    "motel": "hotel",
+    "resort": "hotel",
+    "apartment": "hotel",
+    # Dining / Food
+    "restaurant": "restaurant",
+    "fast_food": "restaurant",
+    "food_court": "restaurant",
+    "pub": "restaurant",
+    "bar": "restaurant",
+    # Cafes
+    "cafe": "cafe",
+    "bakery": "cafe",
+    "ice_cream": "cafe",
+    # Parks / Nature
+    "park": "park",
+    "garden": "park",
+    "nature_reserve": "park",
+    "pitch": "activity",
+    "water_park": "activity",
+    "sports_centre": "activity",
+}
 
 
 class OverpassService:
     """
-    OpenStreetMap Overpass API Service.
-    Discovers 20-50+ real-world travel destinations, attractions, dining, cafes, and accommodations.
+    Service for querying OpenStreetMap elements via the Overpass API.
+    Provides real place discovery without Google Maps/Places or Mapbox dependencies.
     """
 
     def __init__(self):
-        self.timeout = httpx.Timeout(12.0, connect=4.0)
         self.headers = {
-            "User-Agent": "TravelTrack-Explore/3.0 (https://triptrack-frontend.onrender.com; contact: info@triptrack.app)"
+            "User-Agent": "TravelTrack-Explore/3.0 (https://triptrack-frontend.onrender.com; info@triptrack.app)",
+            "Accept": "application/json",
         }
+        self.timeout = httpx.Timeout(4.0, connect=2.0)
+        self._cache: Dict[str, tuple[float, List[Dict[str, Any]]]] = {}
+        self.cache_ttl = 86400  # 24 hours
 
     def _get_cache(self, key: str) -> Optional[List[Dict[str, Any]]]:
-        cached = _OVERPASS_CACHE.get(key)
-        if cached and (time.time() - cached["timestamp"]) < OVERPASS_CACHE_TTL:
-            return cached["data"]
+        if key in self._cache:
+            ts, val = self._cache[key]
+            if time.time() - ts < self.cache_ttl:
+                return val
         return None
 
-    def _set_cache(self, key: str, data: List[Dict[str, Any]]):
-        _OVERPASS_CACHE[key] = {
-            "timestamp": time.time(),
-            "data": data
-        }
+    def _set_cache(self, key: str, val: List[Dict[str, Any]]):
+        self._cache[key] = (time.time(), val)
 
     def _map_osm_category(self, tags: Dict[str, str]) -> str:
-        """Categorize an OSM element into a TravelTrack category."""
-        tourism = tags.get("tourism", "").lower()
-        amenity = tags.get("amenity", "").lower()
-        historic = tags.get("historic", "").lower()
-        leisure = tags.get("leisure", "").lower()
-
-        if tourism in ["hotel", "hostel", "guest_house", "motel", "resort", "alpine_hut", "apartment"]:
-            return "hotel"
-        if amenity in ["restaurant", "food_court"]:
-            return "restaurant"
-        if amenity in ["cafe", "bakery", "bar", "pub"]:
+        """
+        Determine the canonical TravelTrack category from OSM tags.
+        """
+        if "tourism" in tags and tags["tourism"] in OSM_CATEGORY_MAP:
+            return OSM_CATEGORY_MAP[tags["tourism"]]
+        if "historic" in tags and tags["historic"] in OSM_CATEGORY_MAP:
+            return OSM_CATEGORY_MAP[tags["historic"]]
+        if "amenity" in tags and tags["amenity"] in OSM_CATEGORY_MAP:
+            return OSM_CATEGORY_MAP[tags["amenity"]]
+        if "leisure" in tags and tags["leisure"] in OSM_CATEGORY_MAP:
+            return OSM_CATEGORY_MAP[tags["leisure"]]
+        if "shop" in tags and tags["shop"] in ["bakery", "pastry", "coffee", "tea"]:
             return "cafe"
-        if tourism in ["museum", "gallery"]:
-            return "museum"
-        if leisure in ["park", "nature_reserve", "garden"]:
-            return "park"
-        if historic or tourism in ["monument", "memorial", "castle", "fort", "ruins", "archaeological_site", "palace"]:
-            return "historic"
-        if tourism in ["theme_park", "zoo", "aquarium", "water_park"] or leisure in ["sports_centre", "ice_rink", "water_park"]:
-            return "activity"
-        if tourism in ["attraction", "viewpoint", "artwork"] or amenity in ["place_of_worship"]:
-            return "attraction"
-
         return "attraction"
 
-    def _format_address(self, tags: Dict[str, str], fallback_name: str = "") -> str:
-        """Build a clean human-readable address from OSM address tags."""
-        addr_parts = []
-        if tags.get("addr:housenumber"):
-            addr_parts.append(tags["addr:housenumber"])
-        if tags.get("addr:street"):
-            addr_parts.append(tags["addr:street"])
-        if tags.get("addr:suburb"):
-            addr_parts.append(tags["addr:suburb"])
-        if tags.get("addr:district"):
-            addr_parts.append(tags["addr:district"])
-        if tags.get("addr:city"):
-            addr_parts.append(tags["addr:city"])
-        elif tags.get("addr:town"):
-            addr_parts.append(tags["addr:town"])
-        if tags.get("addr:postcode"):
-            addr_parts.append(tags["addr:postcode"])
-        if tags.get("addr:state"):
-            addr_parts.append(tags["addr:state"])
+    def _format_address(self, tags: Dict[str, str], name: str) -> str:
+        """
+        Format a readable address string from OSM address tags.
+        """
+        parts = []
+        street = tags.get("addr:street")
+        housenumber = tags.get("addr:housenumber")
+        if housenumber and street:
+            parts.append(f"{housenumber} {street}")
+        elif street:
+            parts.append(street)
 
-        if addr_parts:
-            return ", ".join(addr_parts)
-        return tags.get("address") or tags.get("location") or fallback_name
+        suburb = tags.get("addr:suburb") or tags.get("addr:district") or tags.get("addr:neighbourhood")
+        if suburb:
+            parts.append(suburb)
 
-    def _build_overpass_query(self, lat: float, lon: float, category: str = "all", radius: int = 15000) -> str:
-        """Construct an optimized Overpass QL query string."""
+        city = tags.get("addr:city") or tags.get("addr:town") or tags.get("addr:village")
+        if city:
+            parts.append(city)
+
+        state = tags.get("addr:state")
+        if state:
+            parts.append(state)
+
+        postcode = tags.get("addr:postcode")
+        if postcode:
+            parts.append(postcode)
+
+        country = tags.get("addr:country")
+        if country:
+            parts.append(country)
+
+        return ", ".join(parts) if parts else name
+
+    def _build_overpass_query(self, lat: float, lon: float, category: str, radius: int) -> str:
+        """
+        Construct an optimized Overpass QL query string for the requested category.
+        """
         cat_lower = category.lower().strip()
 
         if cat_lower == "hotels":
             body = f"""
-  node["tourism"~"hotel|hostel|resort|guest_house|motel"](around:{radius},{lat},{lon});
-  way["tourism"~"hotel|hostel|resort|guest_house|motel"](around:{radius},{lat},{lon});
+  node["tourism"~"hotel|hostel|guest_house|motel|resort"](around:{radius},{lat},{lon});
+  way["tourism"~"hotel|hostel|guest_house|motel|resort"](around:{radius},{lat},{lon});
 """
-        elif cat_lower == "restaurants":
+        elif cat_lower in ["restaurants", "dining"]:
             body = f"""
-  node["amenity"~"restaurant|food_court"](around:{radius},{lat},{lon});
-  way["amenity"~"restaurant|food_court"](around:{radius},{lat},{lon});
+  node["amenity"~"restaurant|fast_food|food_court|pub"](around:{radius},{lat},{lon});
+  way["amenity"~"restaurant|fast_food|food_court|pub"](around:{radius},{lat},{lon});
 """
         elif cat_lower == "cafes":
             body = f"""
-  node["amenity"~"cafe|bakery"](around:{radius},{lat},{lon});
-  way["amenity"~"cafe|bakery"](around:{radius},{lat},{lon});
+  node["amenity"="cafe"](around:{radius},{lat},{lon});
+  node["shop"~"bakery|coffee|tea"](around:{radius},{lat},{lon});
 """
         elif cat_lower == "museums":
             body = f"""
   node["tourism"~"museum|gallery"](around:{radius},{lat},{lon});
   way["tourism"~"museum|gallery"](around:{radius},{lat},{lon});
-  node["historic"~"archaeological_site|museum"](around:{radius},{lat},{lon});
-  way["historic"~"archaeological_site|museum"](around:{radius},{lat},{lon});
 """
         elif cat_lower == "parks":
             body = f"""
@@ -138,7 +181,7 @@ class OverpassService:
   node["historic"~"monument|memorial|castle|fort|ruins|palace|heritage"](around:{radius},{lat},{lon});
   way["historic"~"monument|memorial|castle|fort|ruins|palace|heritage"](around:{radius},{lat},{lon});
 """
-        else: # "all"
+        else:  # "all"
             body = f"""
   node["tourism"~"attraction|museum|gallery|theme_park|zoo|aquarium|viewpoint|hotel|hostel|resort"](around:{radius},{lat},{lon});
   way["tourism"~"attraction|museum|gallery|theme_park|zoo|aquarium|viewpoint|hotel|hostel|resort"](around:{radius},{lat},{lon});
@@ -148,13 +191,23 @@ class OverpassService:
   node["leisure"~"park|garden"](around:{radius},{lat},{lon});
 """
 
-        query = f"""[out:json][timeout:12];
+        query = f"""[out:json][timeout:5];
 (
 {body}
 );
-out center tags 80;
+out center tags 60;
 """
         return query
+
+    async def _query_single_endpoint(self, client: httpx.AsyncClient, endpoint: str, query: str) -> List[Dict[str, Any]]:
+        try:
+            res = await client.post(endpoint, data={"data": query}, headers=self.headers)
+            if res.status_code == 200:
+                data = res.json()
+                return data.get("elements", [])
+        except Exception:
+            pass
+        return []
 
     async def discover_places(
         self,
@@ -165,6 +218,7 @@ out center tags 80;
     ) -> List[Dict[str, Any]]:
         """
         Query Overpass API around given coordinates and return deduplicated, normalized place items.
+        Queries mirrors with fast parallel fallbacks.
         """
         cache_key = f"overpass:{round(lat, 3)}:{round(lon, 3)}:{category.lower()}"
         cached = self._get_cache(cache_key)
@@ -175,20 +229,13 @@ out center tags 80;
         elements = []
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            for endpoint in OVERPASS_ENDPOINTS:
-                try:
-                    res = await client.post(
-                        endpoint,
-                        data={"data": query},
-                        headers=self.headers
-                    )
-                    if res.status_code == 200:
-                        data = res.json()
-                        elements = data.get("elements", [])
-                        if elements:
-                            break
-                except Exception:
-                    continue
+            tasks = [self._query_single_endpoint(client, ep, query) for ep in OVERPASS_ENDPOINTS]
+            # Run mirrors concurrently, pick first successful non-empty result
+            for coro in asyncio.as_completed(tasks):
+                res_elements = await coro
+                if res_elements:
+                    elements = res_elements
+                    break
 
         # Parse, filter, and deduplicate
         seen_names = set()
@@ -203,59 +250,64 @@ out center tags 80;
 
             name_clean = name.strip()
             norm_name = name_clean.lower()
+
             if norm_name in seen_names:
                 continue
 
             el_type = el.get("type", "node")
             el_id = el.get("id")
-            full_id = f"osm_{el_type}_{el_id}"
-            if full_id in seen_ids:
+            canonical_id = f"osm_{el_type}_{el_id}"
+
+            if canonical_id in seen_ids:
                 continue
 
-            # Extract Coordinates
+            # Extract latitude and longitude (nodes have lat/lon directly; ways have center.lat/center.lon)
             p_lat = el.get("lat") or el.get("center", {}).get("lat")
             p_lon = el.get("lon") or el.get("center", {}).get("lon")
+
             if p_lat is None or p_lon is None:
                 continue
 
-            cat = self._map_osm_category(tags)
+            mapped_category = self._map_osm_category(tags)
             address = self._format_address(tags, name_clean)
 
-            # Wikipedia / Wikidata metadata
-            wiki_tag = tags.get("wikipedia") or tags.get("wikipedia:en")
-            wikidata_tag = tags.get("wikidata")
-            img_tag = tags.get("image") or tags.get("wikimedia_commons")
+            # Extract phone, website, opening_hours if available in OSM
+            phone = tags.get("phone") or tags.get("contact:phone")
+            website = tags.get("website") or tags.get("contact:website") or tags.get("url")
+            opening_hours = tags.get("opening_hours")
+            osm_wikipedia = tags.get("wikipedia") or tags.get("wikipedia:en")
+            osm_wikidata = tags.get("wikidata")
+            osm_image = tags.get("image") or tags.get("wikimedia_commons")
 
-            # Collect meaningful tags
-            display_tags = []
-            if tags.get("historic"):
-                display_tags.append(tags["historic"].replace("_", " ").title())
-            if tags.get("tourism"):
-                display_tags.append(tags["tourism"].replace("_", " ").title())
-            if tags.get("amenity"):
-                display_tags.append(tags["amenity"].replace("_", " ").title())
-            if tags.get("cuisine"):
-                display_tags.append(tags["cuisine"].replace("_", " ").title())
+            # Extract descriptive tags
+            tags_list = []
+            if "cuisine" in tags:
+                tags_list.extend([c.strip().title() for c in tags["cuisine"].split(";") if c.strip()])
+            if "stars" in tags:
+                tags_list.append(f"{tags['stars']} Stars")
+            if "heritage" in tags or "historic" in tags:
+                tags_list.append("Heritage")
+            if "tourism" in tags:
+                tags_list.append(tags["tourism"].replace("_", " ").title())
 
             seen_names.add(norm_name)
-            seen_ids.add(full_id)
+            seen_ids.add(canonical_id)
 
             parsed_places.append({
-                "id": full_id,
-                "provider": "openstreetmap",
+                "id": canonical_id,
                 "provider_id": f"{el_type}/{el_id}",
                 "name": name_clean,
-                "category": cat,
+                "category": mapped_category,
                 "address": address,
                 "lat": float(p_lat),
                 "lon": float(p_lon),
-                "osm_wikipedia": wiki_tag,
-                "osm_wikidata": wikidata_tag,
-                "osm_image": img_tag,
-                "phone": tags.get("phone") or tags.get("contact:phone"),
-                "website": tags.get("website") or tags.get("contact:website") or tags.get("url"),
-                "opening_hours": tags.get("opening_hours"),
-                "tags": display_tags[:4]
+                "phone": phone,
+                "website": website,
+                "opening_hours": opening_hours,
+                "osm_wikipedia": osm_wikipedia,
+                "osm_wikidata": osm_wikidata,
+                "osm_image": osm_image,
+                "tags": tags_list[:4]
             })
 
         self._set_cache(cache_key, parsed_places)
