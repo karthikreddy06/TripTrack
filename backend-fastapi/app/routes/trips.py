@@ -2,7 +2,7 @@ from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.auth import get_current_user
-from app.database.mongodb import trips_collection
+from app.database.mongodb import trips_collection, itineraries_collection, expenses_collection
 from app.schemas.trip import TripCreate, TripUpdate
 
 
@@ -40,6 +40,41 @@ def create_trip(
         "message": "Trip created successfully",
         "trip_id": str(result.inserted_id)
     }
+
+
+@router.get("/single/{trip_id}", status_code=status.HTTP_200_OK)
+def get_single_trip(
+    trip_id: str,
+    current_user_id: str = Depends(get_current_user)
+):
+    """
+    Retrieve a single trip by ID for the authenticated user.
+    """
+    if not ObjectId.is_valid(trip_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid trip ID format"
+        )
+
+    try:
+        trip = trips_collection.find_one({
+            "_id": ObjectId(trip_id),
+            "user_id": current_user_id
+        })
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Database query error: {str(exc)}"
+        )
+
+    if not trip:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Trip not found"
+        )
+
+    trip["_id"] = str(trip["_id"])
+    return trip
 
 
 @router.get("/{user_id}", status_code=status.HTTP_200_OK)
@@ -143,7 +178,7 @@ def delete_trip(
     current_user_id: str = Depends(get_current_user)
 ):
     """
-    Delete an existing trip owned by the authenticated user.
+    Delete an existing trip owned by the authenticated user and cascade delete its activities and expenses.
     Returns 400 for invalid ObjectId, 404 if not found or not owned by user.
     """
     if not ObjectId.is_valid(trip_id):
@@ -168,6 +203,13 @@ def delete_trip(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Trip not found"
         )
+
+    # Cascade cleanup for associated itineraries and expenses
+    try:
+        itineraries_collection.delete_many({"trip_id": trip_id})
+        expenses_collection.delete_many({"trip_id": trip_id})
+    except Exception:
+        pass
 
     return {
         "message": "Trip deleted successfully"

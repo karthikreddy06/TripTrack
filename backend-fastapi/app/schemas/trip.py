@@ -1,15 +1,19 @@
 from datetime import date
-from typing import Literal
+from typing import Literal, Optional
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class TripCreate(BaseModel):
     user_id: str = Field(..., min_length=1, description="Owner user ID")
     destination: str = Field(..., min_length=1, description="Trip destination")
+    title: Optional[str] = Field(default=None, max_length=150, description="Optional trip title")
     start_date: str = Field(..., description="Start date in YYYY-MM-DD format")
     end_date: str = Field(..., description="End date in YYYY-MM-DD format")
     status: Literal["planned", "ongoing", "completed", "cancelled"] = "planned"
     budget: float = Field(..., ge=0, description="Trip budget (must be non-negative)")
+    description: Optional[str] = Field(default="", max_length=1000, description="Trip overview/description")
+    travelers: Optional[int] = Field(default=1, ge=1, le=100, description="Number of travelers")
+    notes: Optional[str] = Field(default="", max_length=3000, description="Personal travel notes")
 
     @field_validator("destination")
     @classmethod
@@ -17,6 +21,14 @@ class TripCreate(BaseModel):
         if not v.strip():
             raise ValueError("Destination cannot be empty or whitespace")
         return v.strip()
+
+    @field_validator("title")
+    @classmethod
+    def clean_title(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            v = v.strip()
+            return v if v else None
+        return None
 
     @field_validator("start_date", "end_date")
     @classmethod
@@ -39,10 +51,14 @@ class TripCreate(BaseModel):
 
 class TripUpdate(BaseModel):
     destination: str | None = Field(default=None, min_length=1)
+    title: Optional[str] = Field(default=None, max_length=150)
     start_date: str | None = None
     end_date: str | None = None
     status: Literal["planned", "ongoing", "completed", "cancelled"] | None = None
     budget: float | None = Field(default=None, ge=0)
+    description: Optional[str] = Field(default=None, max_length=1000)
+    travelers: Optional[int] = Field(default=None, ge=1, le=100)
+    notes: Optional[str] = Field(default=None, max_length=3000)
 
     @field_validator("destination")
     @classmethod
@@ -50,6 +66,14 @@ class TripUpdate(BaseModel):
         if v is not None and not v.strip():
             raise ValueError("Destination cannot be empty or whitespace")
         return v.strip() if v is not None else None
+
+    @field_validator("title")
+    @classmethod
+    def clean_title(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            v = v.strip()
+            return v if v else None
+        return None
 
     @field_validator("start_date", "end_date")
     @classmethod

@@ -6,6 +6,13 @@ from fastapi.responses import JSONResponse
 
 from app.routes.users import router as users_router
 from app.routes.trips import router as trips_router
+from app.routes.itinerary import router as itinerary_router
+from app.routes.expenses import router as expenses_router
+from app.routes.ai import router as ai_router
+from app.database.mongodb import init_db_indexes
+
+# Initialize indexes on startup safely
+init_db_indexes()
 
 # Load environment variables from local .env file if available
 try:
@@ -55,8 +62,15 @@ app.add_middleware(
 # Register API routers for root and /api prefixes
 app.include_router(users_router)
 app.include_router(trips_router)
+app.include_router(itinerary_router)
+app.include_router(expenses_router)
+app.include_router(ai_router)
+
 app.include_router(users_router, prefix="/api")
 app.include_router(trips_router, prefix="/api")
+app.include_router(itinerary_router, prefix="/api")
+app.include_router(expenses_router, prefix="/api")
+app.include_router(ai_router, prefix="/api")
 
 
 @app.get("/api", tags=["General"])

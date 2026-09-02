@@ -1,10 +1,12 @@
-from fastapi import APIRouter, HTTPException, status
+from bson import ObjectId
+from fastapi import APIRouter, Depends, HTTPException, status
 import bcrypt
 
 from app.schemas.user import UserCreate
 from app.schemas.login import UserLogin
-from app.database.mongodb import users_collection
-from app.auth import create_access_token
+from app.schemas.profile import ProfileUpdate, PasswordChange
+from app.database.mongodb import users_collection, trips_collection
+from app.auth import create_access_token, get_current_user
 
 
 router = APIRouter(
@@ -46,7 +48,10 @@ def register_user(user: UserCreate):
     user_data = {
         "name": user.name.strip(),
         "email": user.email.lower(),
-        "password": hashed_password
+        "password": hashed_password,
+        "bio": "",
+        "travel_preferences": [],
+        "home_currency": "USD"
     }
 
     try:
@@ -112,3 +117,138 @@ def login_user(user: UserLogin):
         "name": existing_user.get("name", ""),
         "email": existing_user["email"]
     }
+
+
+@router.get("/me", status_code=status.HTTP_200_OK)
+def get_user_profile(current_user_id: str = Depends(get_current_user)):
+    """
+    Retrieve authenticated user profile information and overall statistics.
+    Never exposes passwords or sensitive auth data.
+    """
+    if not ObjectId.is_valid(current_user_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid user ID format"
+        )
+
+    try:
+        user = users_collection.find_one(
+            {"_id": ObjectId(current_user_id)},
+            {"password": 0}  # Exclude password hash
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Database query error: {str(exc)}"
+        )
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+
+    user["_id"] = str(user["_id"])
+    user["user_id"] = str(user["_id"])
+    return user
+
+
+@router.put("/profile", status_code=status.HTTP_200_OK)
+def update_user_profile(
+    profile: ProfileUpdate,
+    current_user_id: str = Depends(get_current_user)
+):
+    """
+    Update profile details for the authenticated user (name, bio, preferences).
+    """
+    if not ObjectId.is_valid(current_user_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid user ID format"
+        )
+
+    update_data = {k: v for k, v in profile.model_dump().items() if v is not None}
+    if not update_data:
+        return {"message": "Profile updated successfully"}
+
+    try:
+        result = users_collection.update_one(
+            {"_id": ObjectId(current_user_id)},
+            {"$set": update_data}
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Database update error: {str(exc)}"
+        )
+
+    if result.matched_count == 0:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+
+    return {"message": "Profile updated successfully"}
+
+
+@router.put("/change-password", status_code=status.HTTP_200_OK)
+def change_password(
+    pwd_data: PasswordChange,
+    current_user_id: str = Depends(get_current_user)
+):
+    """
+    Change user password securely after verifying their current password.
+    """
+    if not ObjectId.is_valid(current_user_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid user ID format"
+        )
+
+    try:
+        user = users_collection.find_one({"_id": ObjectId(current_user_id)})
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Database query error: {str(exc)}"
+        )
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+
+    # Verify current password
+    try:
+        matches = bcrypt.checkpw(
+            pwd_data.current_password.encode("utf-8"),
+            user["password"].encode("utf-8")
+        )
+    except Exception:
+        matches = False
+
+    if not matches:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current password does not match"
+        )
+
+    # Hash new password
+    hashed_new = bcrypt.hashpw(
+        pwd_data.new_password.encode("utf-8"),
+        bcrypt.gensalt()
+    ).decode("utf-8")
+
+    try:
+        users_collection.update_one(
+            {"_id": ObjectId(current_user_id)},
+            {"$set": {"password": hashed_new}}
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Database update error: {str(exc)}"
+        )
+
+    return {"message": "Password changed successfully"}
