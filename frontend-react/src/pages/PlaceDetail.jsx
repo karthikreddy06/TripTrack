@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
   MapPin,
   Star,
@@ -11,7 +11,8 @@ import {
   Phone,
   Compass,
   Scroll,
-  ExternalLink
+  ExternalLink,
+  Sparkles
 } from 'lucide-react';
 import { exploreAPI, wishlistAPI, resolveImageUrl, extractErrorMessage } from '../services/api';
 import { useAuth } from '../context/AuthContext';
@@ -20,12 +21,14 @@ import { PlaceCard } from '../components/PlaceCard';
 import { MapView } from '../components/MapView';
 import { AddToTripModal } from '../components/AddToTripModal';
 import { SafeImage } from '../components/SafeImage';
+import { calculateDistanceKm } from '../utils/geo';
 
 export const PlaceDetail = () => {
   const { placeId } = useParams();
   const decodedPlaceId = decodeURIComponent(placeId || '');
   const { isAuthenticated } = useAuth();
   const { showSuccess, showError } = useToast();
+  const navigate = useNavigate();
 
   const [placeData, setPlaceData] = useState(null);
   const [nearbyPlaces, setNearbyPlaces] = useState([]);
@@ -104,6 +107,29 @@ export const PlaceDetail = () => {
     }
   };
 
+  const handlePlanAroundPlace = () => {
+    if (!placeData) return;
+    const loc = placeData.location || placeData.address || placeData.name;
+    const dest = loc.split(',')[0].trim();
+    navigate('/ai-planner', {
+      state: {
+        prefill: {
+          destination: dest,
+          anchor_place_id: placeData.id || placeData.place_id || decodedPlaceId,
+          anchor_place_name: placeData.name,
+        },
+      },
+    });
+  };
+
+  const nearbyWithDistances = useMemo(() => {
+    if (!placeData || !nearbyPlaces) return [];
+    return nearbyPlaces.map((np) => {
+      const dist = calculateDistanceKm(placeData.lat, placeData.lon, np.lat, np.lon);
+      return { ...np, distance_km: dist };
+    }).sort((a, b) => (a.distance_km || 999) - (b.distance_km || 999));
+  }, [placeData, nearbyPlaces]);
+
   if (loading) {
     return (
       <div className="main-content">
@@ -138,7 +164,7 @@ export const PlaceDetail = () => {
           <Compass size={36} style={{ color: 'var(--accent)', margin: '0 auto 1rem' }} />
           <h2>Place Details Unavailable</h2>
           <p style={{ color: 'var(--text-secondary)', margin: '0.5rem 0 1.5rem' }}>
-            {error || 'The requested place could not be located in OpenStreetMap.'}
+            {error || 'The requested place could not be located.'}
           </p>
           <Link to="/explore" className="btn btn-primary">
             Explore Other Destinations
@@ -149,7 +175,8 @@ export const PlaceDetail = () => {
   }
 
   const pId = placeData.id || placeData.place_id || decodedPlaceId;
-  const isVerified = Boolean(placeData.image_verified || placeData.image_url);
+  const photoUrl = resolveImageUrl(placeData.image_url);
+  const hasVerifiedPhoto = Boolean(placeData.image_verified && photoUrl);
 
   return (
     <div className="main-content">
@@ -174,17 +201,18 @@ export const PlaceDetail = () => {
 
       {/* Place Hero Card */}
       <div className="place-detail-hero card" style={{ marginBottom: '2.5rem' }}>
-        <div className="place-detail-grid">
-          {/* Main Photo / SafeImage placeholder */}
-          <div className="place-detail-photo-gallery" style={{ height: '340px', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
-            <SafeImage
-              src={resolveImageUrl(placeData.image_url)}
-              alt={placeData.name}
-              isVerified={isVerified}
-              placeholderText="NO VERIFIED PHOTO AVAILABLE"
-              style={{ height: '100%' }}
-            />
-          </div>
+        <div className={hasVerifiedPhoto ? 'place-detail-grid' : 'place-detail-grid-no-photo'} style={{ display: 'grid', gridTemplateColumns: hasVerifiedPhoto ? '1.1fr 1fr' : '1fr', gap: '2rem' }}>
+          {/* Main Photo ONLY IF verified */}
+          {hasVerifiedPhoto && (
+            <div className="place-detail-photo-gallery" style={{ height: '360px', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
+              <SafeImage
+                src={photoUrl}
+                alt={placeData.name}
+                isVerified={true}
+                style={{ height: '100%' }}
+              />
+            </div>
+          )}
 
           {/* Place Details Content */}
           <div className="place-detail-info">
@@ -192,16 +220,18 @@ export const PlaceDetail = () => {
               <i></i> {placeData.category?.toUpperCase() || 'PLACE'}
             </div>
 
-            <h1 className="place-detail-title">{placeData.name}</h1>
+            <h1 className="place-detail-title" style={{ fontSize: '2.1rem', margin: '0.35rem 0 0.5rem 0' }}>
+              {placeData.name}
+            </h1>
 
-            <div className="place-detail-address">
+            <div className="place-detail-address" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: '0.75rem' }}>
               <MapPin size={14} />
               <span>{placeData.address || placeData.location || 'Location details available'}</span>
             </div>
 
             {/* Rating if available */}
             {typeof placeData.rating === 'number' && placeData.rating > 0 && (
-              <div className="place-detail-rating-row" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.75rem' }}>
+              <div className="place-detail-rating-row" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '3px', color: '#d97706', fontWeight: 600, fontSize: '0.9rem' }}>
                   <Star size={14} fill="currentColor" />
                   <span>{placeData.rating.toFixed(1)}</span>
@@ -214,7 +244,7 @@ export const PlaceDetail = () => {
               </div>
             )}
 
-            <p className="place-detail-desc" style={{ marginTop: '1rem', lineHeight: '1.6' }}>
+            <p className="place-detail-desc" style={{ lineHeight: '1.65', color: 'var(--text-primary)', fontSize: '0.95rem' }}>
               {placeData.description}
             </p>
 
@@ -229,8 +259,8 @@ export const PlaceDetail = () => {
               </div>
             )}
 
-            {/* Meta Items & Provenance Links */}
-            <div className="place-detail-meta-box" style={{ marginTop: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            {/* Useful Contact & Provenance Metadata */}
+            <div className="place-detail-meta-box" style={{ marginTop: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
               {placeData.opening_hours && (
                 <div className="meta-item" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
                   <Clock size={13} />
@@ -310,6 +340,16 @@ export const PlaceDetail = () => {
                 <Plus size={14} />
                 <span>Add to Trip</span>
               </button>
+
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={handlePlanAroundPlace}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', color: 'var(--primary-green)' }}
+              >
+                <Sparkles size={14} />
+                <span>Plan Around This Place</span>
+              </button>
             </div>
           </div>
         </div>
@@ -319,8 +359,13 @@ export const PlaceDetail = () => {
       {placeData.lat && placeData.lon && (
         <div className="card" style={{ marginBottom: '2.5rem', padding: '1.75rem' }}>
           <div className="section-header" style={{ marginBottom: '1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h3 style={{ fontSize: '1.35rem', margin: 0 }}>OpenStreetMap Location</h3>
-            <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+            <div>
+              <h3 style={{ fontSize: '1.35rem', margin: 0 }}>OpenStreetMap Location</h3>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', margin: '0.2rem 0 0 0' }}>
+                Interactive map displaying {placeData.name} and neighboring sights.
+              </p>
+            </div>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
               {placeData.lat.toFixed(4)}, {placeData.lon.toFixed(4)}
             </span>
           </div>
@@ -334,25 +379,26 @@ export const PlaceDetail = () => {
         </div>
       )}
 
-      {/* Nearby Places Section */}
-      {nearbyPlaces.length > 0 && (
+      {/* Nearby Places Section with Distance */}
+      {nearbyWithDistances.length > 0 && (
         <div className="nearby-places-section" style={{ marginTop: '3rem' }}>
           <div className="section-header" style={{ marginBottom: '1.25rem' }}>
             <div>
-              <h2 className="section-title">Verified Nearby Places</h2>
+              <h2 className="section-title">Nearby Places &amp; Distances</h2>
               <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-                Other notable sights, restaurants, and stays discovered in this area.
+                Other notable sights, restaurants, and stays with approximate distance from {placeData.name}.
               </p>
             </div>
           </div>
 
           <div className="places-grid">
-            {nearbyPlaces.map((nearby) => {
+            {nearbyWithDistances.map((nearby) => {
               const nId = nearby.id || nearby.place_id || nearby.provider_id;
               return (
                 <PlaceCard
                   key={nId}
                   place={nearby}
+                  anchorDistanceKm={nearby.distance_km}
                   onAddToTrip={(p) => setModalPlace(p)}
                 />
               );

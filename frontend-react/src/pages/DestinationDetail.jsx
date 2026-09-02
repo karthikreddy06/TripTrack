@@ -118,6 +118,8 @@ export const DestinationDetail = () => {
     );
   }
 
+  const hasHeroImage = Boolean(destSummary.image_url);
+
   return (
     <div className="main-content">
       {/* Back to Explore */}
@@ -141,17 +143,17 @@ export const DestinationDetail = () => {
 
       {/* Destination Hero Header */}
       <div className="destination-hero-header card">
-        <div className="dest-hero-grid">
-          <div style={{ maxWidth: '340px', width: '100%', height: '260px', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
-            <SafeImage
-              src={resolveImageUrl(destSummary.image_url)}
-              alt={destSummary.destination}
-              isVerified={Boolean(destSummary.image_url)}
-              placeholderText="DESTINATION GUIDE"
-              icon={Compass}
-              style={{ height: '100%' }}
-            />
-          </div>
+        <div className={hasHeroImage ? 'dest-hero-grid' : 'dest-hero-grid-no-photo'} style={{ display: 'grid', gridTemplateColumns: hasHeroImage ? '340px 1fr' : '1fr', gap: '2rem' }}>
+          {hasHeroImage && (
+            <div style={{ maxWidth: '340px', width: '100%', height: '260px', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
+              <SafeImage
+                src={resolveImageUrl(destSummary.image_url)}
+                alt={destSummary.destination}
+                isVerified={true}
+                style={{ height: '100%' }}
+              />
+            </div>
+          )}
 
           <div className="dest-hero-content">
             <div className="editorial-mark">
@@ -195,7 +197,7 @@ export const DestinationDetail = () => {
                 className="btn btn-primary btn-sm"
               >
                 <Sparkles size={13} />
-                <span>Plan Trip to {destSummary.destination}</span>
+                <span>Plan Trip to {destSummary.destination} with AI</span>
               </Link>
               <Link
                 to={`/trips/new`}

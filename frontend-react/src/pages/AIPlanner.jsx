@@ -9,12 +9,15 @@ import {
   Briefcase,
   Lightbulb,
   ArrowLeft,
-  BookmarkPlus
+  BookmarkPlus,
+  Navigation,
+  X
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { aiAPI, tripsAPI, itineraryAPI, extractErrorMessage } from '../services/api';
 import { Alert } from '../components/Alert';
+import { formatDistance } from '../utils/geo';
 
 const INTEREST_OPTIONS = [
   'Culture & Heritage',
@@ -54,6 +57,9 @@ export const AIPlanner = () => {
     budget: prefill.budget !== undefined ? String(prefill.budget) : '',
     interests: ['Culture & Heritage', 'Local Cuisine & Food'],
     travel_style: 'Balanced',
+    anchor_place_id: prefill.anchor_place_id || null,
+    anchor_place_name: prefill.anchor_place_name || null,
+    include_wishlist: true,
   });
 
   const [generating, setGenerating] = useState(false);
@@ -70,6 +76,14 @@ export const AIPlanner = () => {
       }
       return { ...prev, interests: [...prev.interests, interest] };
     });
+  };
+
+  const handleClearAnchor = () => {
+    setFormData((prev) => ({
+      ...prev,
+      anchor_place_id: null,
+      anchor_place_name: null,
+    }));
   };
 
   const handleGenerate = async (e) => {
@@ -92,11 +106,14 @@ export const AIPlanner = () => {
         budget: formData.budget ? parseFloat(formData.budget) : undefined,
         interests: formData.interests,
         travel_style: formData.travel_style,
+        anchor_place_id: formData.anchor_place_id || undefined,
+        anchor_place_name: formData.anchor_place_name || undefined,
+        include_wishlist: formData.include_wishlist,
       });
 
       setGeneratedPlan(plan);
       setActiveDayIndex(0);
-      showSuccess('AI Itinerary generated successfully!');
+      showSuccess('Grounded itinerary curated with real OpenStreetMap data!');
     } catch (err) {
       setError(extractErrorMessage(err));
     } finally {
@@ -122,14 +139,14 @@ export const AIPlanner = () => {
       const createdTrip = await tripsAPI.createTrip({
         user_id: user.user_id,
         destination: generatedPlan.destination,
-        title: `${generatedPlan.destination} — ${formData.travel_style}`,
+        title: `${generatedPlan.destination} — ${formData.travel_style} Journey`,
         start_date: startDate,
         end_date: endDate,
         status: 'planned',
-        budget: parseFloat(formData.budget) || (daysCount * 150),
+        budget: parseFloat(formData.budget) || (daysCount * 140),
         travelers: parseInt(formData.travelers, 10) || 1,
         description: generatedPlan.summary,
-        notes: `Packing:\n- ${generatedPlan.packing_list?.slice(0, 5).join('\n- ')}\n\nTips:\n- ${generatedPlan.travel_tips?.slice(0, 3).join('\n- ')}`,
+        notes: `Itinerary Strategy:\n${generatedPlan.itinerary_rationale || ''}\n\nPacking:\n- ${generatedPlan.packing_list?.slice(0, 5).join('\n- ')}`,
       });
 
       const tripId = createdTrip.trip_id;
@@ -144,11 +161,12 @@ export const AIPlanner = () => {
                 trip_id: tripId,
                 day_number: day.day,
                 date: actDate,
-                time: act.time || '09:00 AM',
+                time: act.time || '09:30 AM',
                 title: act.title,
                 location: act.location || '',
                 description: act.description || '',
                 cost: parseFloat(act.estimated_cost) || 0,
+                notes: act.category ? `Category: ${act.category}` : undefined,
               });
             }
           }
@@ -195,14 +213,14 @@ export const AIPlanner = () => {
       <div className="dashboard-header">
         <div className="dashboard-title-group">
           <div className="editorial-mark">
-            <i></i> 05 / AI TRAVEL PLANNER
+            <i></i> 05 / GROUNDED AI TRAVEL PLANNER
           </div>
           <h1>
             Intelligent journeys, <br />
-            <em>curated in seconds.</em>
+            <em>grounded in real places.</em>
           </h1>
           <p className="welcome-subtitle">
-            Provide your destination, dates, budget, and travel interests. Our AI assistant will construct a full day-by-day itinerary, packing list, and budget breakdown.
+            Curates day-by-day itineraries analyzing real OpenStreetMap sights, wishlists, and geographic distances to minimize cross-city transit.
           </p>
         </div>
       </div>
@@ -218,6 +236,38 @@ export const AIPlanner = () => {
           </div>
 
           <form onSubmit={handleGenerate}>
+            {/* Anchor Landmark Banner if present */}
+            {formData.anchor_place_name && (
+              <div
+                style={{
+                  background: 'rgba(95, 155, 104, 0.12)',
+                  border: '1px solid var(--primary-green)',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '0.65rem 0.85rem',
+                  marginBottom: '1.25rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '0.5rem',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                  <Sparkles size={14} style={{ color: 'var(--primary-green)' }} />
+                  <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                    Anchored around: <strong>{formData.anchor_place_name}</strong>
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleClearAnchor}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)' }}
+                  title="Clear anchor"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            )}
+
             <div className="form-group">
               <label className="form-label" htmlFor="ai-destination">
                 DESTINATION <span style={{ color: 'var(--accent)' }}>*</span>
@@ -226,7 +276,7 @@ export const AIPlanner = () => {
                 id="ai-destination"
                 type="text"
                 className="form-input"
-                placeholder="e.g. Kyoto, Japan or Amalfi Coast, Italy"
+                placeholder="e.g. Hyderabad, Bengaluru, Goa, Paris"
                 value={formData.destination}
                 onChange={(e) => setFormData({ ...formData, destination: e.target.value })}
                 required
@@ -316,7 +366,7 @@ export const AIPlanner = () => {
             </div>
 
             <div className="form-group">
-              <label className="form-label">INTERESTS & ACTIVITIES</label>
+              <label className="form-label">INTERESTS &amp; ACTIVITIES</label>
               <div className="interest-tags-container">
                 {INTEREST_OPTIONS.map((interest) => {
                   const isSelected = formData.interests.includes(interest);
@@ -344,12 +394,12 @@ export const AIPlanner = () => {
               {generating ? (
                 <>
                   <span className="spinner" />
-                  <span>Curating Itinerary...</span>
+                  <span>Curating Grounded Itinerary...</span>
                 </>
               ) : (
                 <>
                   <Sparkles size={15} />
-                  <span>Generate AI Itinerary</span>
+                  <span>Generate Grounded Itinerary</span>
                 </>
               )}
             </button>
@@ -361,9 +411,9 @@ export const AIPlanner = () => {
           {generating ? (
             <div className="card" style={{ padding: '4rem 2rem', textAlign: 'center' }}>
               <div className="spinner spinner-lg" style={{ margin: '0 auto 1.5rem' }} />
-              <h3>Creating your personalized journey...</h3>
-              <p style={{ color: 'var(--text-secondary)', maxWidth: '420px', margin: '0.5rem auto 0' }}>
-                Analyzing top attractions, dining hotspots, and optimal daily pacing for {formData.destination || 'your destination'}.
+              <h3>Analyzing real OpenStreetMap landmarks &amp; routes...</h3>
+              <p style={{ color: 'var(--text-secondary)', maxWidth: '440px', margin: '0.5rem auto 0' }}>
+                Clustering verified places in {formData.destination || 'your destination'} by geographic proximity to minimize transit time.
               </p>
             </div>
           ) : generatedPlan ? (
@@ -372,7 +422,7 @@ export const AIPlanner = () => {
               <div className="card" style={{ marginBottom: '1.5rem' }}>
                 <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem', marginBottom: '1rem' }}>
                   <div>
-                    <div className="editorial-mark"><i></i> CURATED ITINERARY</div>
+                    <div className="editorial-mark"><i></i> GROUNDED ITINERARY</div>
                     <h2 style={{ fontSize: '2rem' }}>{generatedPlan.destination}</h2>
                     <p style={{ color: 'var(--text-secondary)', marginTop: '0.4rem', fontSize: '0.95rem' }}>
                       {generatedPlan.summary}
@@ -399,9 +449,27 @@ export const AIPlanner = () => {
                   </button>
                 </div>
 
+                {/* Itinerary Rationale Box */}
+                {generatedPlan.itinerary_rationale && (
+                  <div
+                    style={{
+                      background: 'var(--surface, #f8f9f6)',
+                      borderLeft: '3px solid var(--primary-green)',
+                      padding: '0.75rem 1rem',
+                      borderRadius: '0 var(--radius-sm) var(--radius-sm) 0',
+                      fontSize: '0.85rem',
+                      color: 'var(--text-primary)',
+                      lineHeight: '1.5',
+                      marginBottom: '1rem',
+                    }}
+                  >
+                    <strong>Route Strategy:</strong> {generatedPlan.itinerary_rationale}
+                  </div>
+                )}
+
                 {/* Estimated Budget Cards */}
                 {generatedPlan.budget_breakdown && (
-                  <div className="category-breakdown-row" style={{ marginTop: '1rem' }}>
+                  <div className="category-breakdown-row" style={{ marginTop: '0.75rem' }}>
                     {Object.entries(generatedPlan.budget_breakdown).map(([cat, amt]) => (
                       <div key={cat} className="category-pill">
                         <span className="cat-name">{cat}</span>
@@ -429,13 +497,18 @@ export const AIPlanner = () => {
               {/* Active Day Activities */}
               {generatedPlan.itinerary[activeDayIndex] && (
                 <div className="card" style={{ marginBottom: '1.5rem' }}>
-                  <div style={{ borderBottom: '1px solid var(--border)', paddingBottom: '0.75rem', marginBottom: '1.25rem' }}>
+                  <div style={{ borderBottom: '1px solid var(--border)', paddingBottom: '0.85rem', marginBottom: '1.25rem' }}>
                     <div className="editorial-mark">
                       <i></i> DAY {generatedPlan.itinerary[activeDayIndex].day}
                     </div>
-                    <h3 style={{ fontSize: '1.4rem' }}>
+                    <h3 style={{ fontSize: '1.35rem', margin: '0.25rem 0' }}>
                       {generatedPlan.itinerary[activeDayIndex].theme}
                     </h3>
+                    {generatedPlan.itinerary[activeDayIndex].rationale && (
+                      <p style={{ color: 'var(--text-secondary)', fontSize: '0.82rem', margin: '0.35rem 0 0 0', lineHeight: 1.4 }}>
+                        {generatedPlan.itinerary[activeDayIndex].rationale}
+                      </p>
+                    )}
                   </div>
 
                   <div className="timeline-activities-list">
@@ -446,8 +519,33 @@ export const AIPlanner = () => {
                           <span>{act.time}</span>
                         </div>
                         <div className="activity-content-col">
-                          <div className="activity-header-row">
-                            <h4 className="activity-title">{act.title}</h4>
+                          <div className="activity-header-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                              <h4 className="activity-title" style={{ margin: 0 }}>{act.title}</h4>
+                              {act.category && (
+                                <span className={`place-category-badge cat-${act.category.toLowerCase()}`} style={{ fontSize: '0.65rem' }}>
+                                  {act.category.toUpperCase()}
+                                </span>
+                              )}
+                              {act.distance_km !== null && act.distance_km !== undefined && (
+                                <span
+                                  style={{
+                                    fontFamily: 'var(--font-mono)',
+                                    fontSize: '0.7rem',
+                                    color: 'var(--primary-green)',
+                                    background: 'rgba(95, 155, 104, 0.1)',
+                                    padding: '1px 6px',
+                                    borderRadius: '3px',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '3px',
+                                  }}
+                                >
+                                  <Navigation size={9} />
+                                  <span>{formatDistance(act.distance_km)}</span>
+                                </span>
+                              )}
+                            </div>
                             {act.estimated_cost > 0 && (
                               <span className="activity-cost-tag">
                                 {formatCurrency(act.estimated_cost)}
@@ -455,12 +553,14 @@ export const AIPlanner = () => {
                             )}
                           </div>
                           {act.location && (
-                            <div className="activity-location">
+                            <div className="activity-location" style={{ marginTop: '0.35rem' }}>
                               <MapPin size={12} />
                               <span>{act.location}</span>
                             </div>
                           )}
-                          <p className="activity-desc">{act.description}</p>
+                          <p className="activity-desc" style={{ marginTop: '0.4rem', fontSize: '0.85rem', lineHeight: '1.45' }}>
+                            {act.description}
+                          </p>
                         </div>
                       </div>
                     ))}
@@ -508,7 +608,7 @@ export const AIPlanner = () => {
               </div>
               <h3 className="empty-title">Ready to plan your escape?</h3>
               <p className="empty-desc">
-                Fill out the preferences on the left and generate a complete travel itinerary with suggested timing, activities, estimated costs, and packing checklist.
+                Fill out the preferences on the left to generate a realistic travel itinerary analyzing real OpenStreetMap sights, distances, and pacing.
               </p>
             </div>
           )}

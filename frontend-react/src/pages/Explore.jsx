@@ -15,7 +15,8 @@ import {
   Coffee,
   Trees,
   Scroll,
-  ChevronDown
+  ChevronDown,
+  Sparkles
 } from 'lucide-react';
 import { exploreAPI, resolveImageUrl, extractErrorMessage } from '../services/api';
 import { PlaceCard } from '../components/PlaceCard';
@@ -173,6 +174,8 @@ export const Explore = () => {
     }
   };
 
+  const hasDestImage = Boolean(destinationInfo?.image_url);
+
   return (
     <div className="main-content explore-page-container">
       {/* Editorial Header & Hero Search */}
@@ -260,20 +263,20 @@ export const Explore = () => {
 
       {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
 
-      {/* Destination Overview Box */}
+      {/* Destination Overview Box (Only renders image box IF photo exists) */}
       {destinationInfo && (
         <div className="card destination-overview-banner" style={{ marginBottom: '2rem' }}>
-          <div className="dest-banner-grid">
-            <div style={{ maxWidth: '320px', width: '100%', height: '200px', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
-              <SafeImage
-                src={resolveImageUrl(destinationInfo.image_url)}
-                alt={destinationInfo.destination}
-                isVerified={Boolean(destinationInfo.image_url)}
-                placeholderText="DESTINATION GUIDE"
-                icon={Compass}
-                style={{ height: '100%' }}
-              />
-            </div>
+          <div className={hasDestImage ? 'dest-banner-grid' : 'dest-banner-grid-no-photo'} style={{ display: 'grid', gridTemplateColumns: hasDestImage ? '320px 1fr' : '1fr', gap: '2rem' }}>
+            {hasDestImage && (
+              <div style={{ maxWidth: '320px', width: '100%', height: '200px', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
+                <SafeImage
+                  src={resolveImageUrl(destinationInfo.image_url)}
+                  alt={destinationInfo.destination}
+                  isVerified={true}
+                  style={{ height: '100%' }}
+                />
+              </div>
+            )}
 
             <div className="dest-banner-content">
               <div className="editorial-mark">
@@ -281,17 +284,27 @@ export const Explore = () => {
               </div>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem' }}>
                 <h2 style={{ fontSize: '1.9rem', margin: 0 }}>{destinationInfo.destination}</h2>
-                <Link
-                  to={`/explore/${encodeURIComponent(destinationInfo.destination.toLowerCase())}`}
-                  className="btn btn-secondary btn-sm"
-                >
-                  <span>Explore Guide</span>
-                  <ArrowUpRight size={13} />
-                </Link>
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                  <Link
+                    to="/ai-planner"
+                    state={{ prefill: { destination: destinationInfo.destination } }}
+                    className="btn btn-primary btn-sm"
+                  >
+                    <Sparkles size={13} />
+                    <span>Plan with AI</span>
+                  </Link>
+                  <Link
+                    to={`/explore/${encodeURIComponent(destinationInfo.destination.toLowerCase())}`}
+                    className="btn btn-secondary btn-sm"
+                  >
+                    <span>Guide</span>
+                    <ArrowUpRight size={13} />
+                  </Link>
+                </div>
               </div>
 
               {destinationInfo.country && (
-                <p className="dest-banner-location">
+                <p className="dest-banner-location" style={{ marginTop: '0.35rem' }}>
                   <MapPin size={13} />
                   <span>{destinationInfo.country}</span>
                 </p>

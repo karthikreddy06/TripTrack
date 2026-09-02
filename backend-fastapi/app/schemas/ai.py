@@ -11,6 +11,10 @@ class AITripPlanRequest(BaseModel):
     budget: Optional[float] = Field(default=None, ge=0)
     interests: List[str] = Field(default_factory=list)
     travel_style: Optional[str] = Field(default="Balanced", max_length=50)
+    anchor_place_id: Optional[str] = None
+    anchor_place_name: Optional[str] = None
+    selected_place_ids: List[str] = Field(default_factory=list)
+    include_wishlist: bool = Field(default=True)
 
     @field_validator("destination")
     @classmethod
@@ -25,6 +29,11 @@ class AITripActivity(BaseModel):
     title: str
     location: str
     description: str
+    place_id: Optional[str] = None
+    category: Optional[str] = None
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+    distance_km: Optional[float] = None
     estimated_cost: float = 0.0
 
 
@@ -32,6 +41,7 @@ class AIDayPlan(BaseModel):
     day: int
     date: Optional[str] = ""
     theme: str
+    rationale: Optional[str] = None  # Geographic and timing rationale for the cluster
     activities: List[AITripActivity]
 
 
@@ -39,11 +49,12 @@ class AITripPlanResponse(BaseModel):
     destination: str
     days: int
     summary: str
+    itinerary_rationale: Optional[str] = None
     itinerary: List[AIDayPlan]
     packing_list: List[str]
     travel_tips: List[str]
     budget_breakdown: Dict[str, float]
-    source: str = "ai"  # "ai" or "template_fallback"
+    source: str = "ai"  # "ai" or "data_driven_cluster"
 
 
 class AIBudgetAdviceRequest(BaseModel):
