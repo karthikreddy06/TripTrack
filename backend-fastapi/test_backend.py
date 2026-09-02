@@ -279,7 +279,7 @@ def run_tests():
     assert res.status_code == 401, f"Expected 401 Unauthorized, got {res.status_code}"
 
     # 14. Explore & Travel Discovery (Google Places Canonical ID & Photo Consistency)
-    print("\n[TEST 14] Testing Explore Discovery Endpoints & Photo Consistency...")
+    print("\n[TEST 14] Testing Explore Discovery Endpoints & Multi-City Global Search...")
     res = test_client.get("/explore/featured")
     print("Explore featured response:", res.status_code, "Count:", len(res.json()))
     assert res.status_code == 200
@@ -301,6 +301,29 @@ def run_tests():
     print("Explore search Goa response:", res.status_code, "Results:", res.json().get("total_results"))
     assert res.status_code == 200
     assert res.json()["total_results"] > 0
+
+    # Search Bengaluru (Global multi-destination test)
+    res = test_client.get("/explore/search?q=bengaluru&category=all")
+    print("Explore search Bengaluru response:", res.status_code, "Results:", res.json().get("total_results"))
+    assert res.status_code == 200
+    assert res.json()["total_results"] > 0
+
+    # Search Paris (International destination test)
+    res = test_client.get("/explore/search?q=paris&category=all")
+    print("Explore search Paris response:", res.status_code, "Results:", res.json().get("total_results"))
+    assert res.status_code == 200
+    assert res.json()["total_results"] > 0
+
+    # Search Tokyo (International destination test)
+    res = test_client.get("/explore/search?q=tokyo&category=all")
+    print("Explore search Tokyo response:", res.status_code, "Results:", res.json().get("total_results"))
+    assert res.status_code == 200
+    assert res.json()["total_results"] > 0
+
+    # Search Arbitrary Query (Dynamic discovery test)
+    res = test_client.get("/explore/search?q=Kyoto&category=all")
+    print("Explore search Kyoto response:", res.status_code, "Results:", res.json().get("total_results"))
+    assert res.status_code == 200
 
     # Destination details
     res = test_client.get("/explore/destinations/hyderabad")

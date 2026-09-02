@@ -31,9 +31,12 @@ const CATEGORIES = [
 const FEATURED_SHORTCUTS = [
   { name: 'Hyderabad', label: 'Hyderabad, India', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/71/Charminar_Hyderabad_1.jpg/400px-Charminar_Hyderabad_1.jpg' },
   { name: 'Goa', label: 'Goa, India', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/7b/Baga_Beach_North_Goa.jpg/400px-Baga_Beach_North_Goa.jpg' },
+  { name: 'Bengaluru', label: 'Bengaluru, India', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/8f/Lalbagh_Glass_house_Bangalore.jpg/400px-Lalbagh_Glass_house_Bangalore.jpg' },
   { name: 'Delhi', label: 'Delhi, India', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/09/India_Gate_in_New_Delhi_03-2016.jpg/400px-India_Gate_in_New_Delhi_03-2016.jpg' },
   { name: 'Mumbai', label: 'Mumbai, India', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/3/3a/Mumbai_03-2016_30_Gateway_of_India.jpg/400px-Mumbai_03-2016_30_Gateway_of_India.jpg' },
   { name: 'Paris', label: 'Paris, France', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/85/Tour_Eiffel_Wikimedia_Commons_%28cropped%29.jpg/400px-Tour_Eiffel_Wikimedia_Commons_%28cropped%29.jpg' },
+  { name: 'Dubai', label: 'Dubai, UAE', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/93/Burj_Khalifa.jpg/400px-Burj_Khalifa.jpg' },
+  { name: 'Tokyo', label: 'Tokyo, Japan', img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/ca/Senso-ji_Main_Hall_Tokyo.jpg/400px-Senso-ji_Main_Hall_Tokyo.jpg' },
 ];
 
 export const Explore = () => {

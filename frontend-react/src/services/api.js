@@ -3,7 +3,7 @@ import axios from 'axios';
 // Base API URL configuration
 // In production on Render/Vercel, VITE_API_URL points to the backend web service URL.
 // In local development, VITE_API_URL defaults to 'http://127.0.0.1:8000'.
-const getBaseUrl = () => {
+export const getBaseUrl = () => {
   const envUrl = import.meta.env.VITE_API_URL;
   if (envUrl) {
     return envUrl.replace(/\/+$/, '');
@@ -11,7 +11,16 @@ const getBaseUrl = () => {
   return 'http://127.0.0.1:8000';
 };
 
-const API_BASE_URL = getBaseUrl();
+export const API_BASE_URL = getBaseUrl();
+
+export const resolveImageUrl = (url) => {
+  if (!url) return null;
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) {
+    return url;
+  }
+  const base = getBaseUrl();
+  return `${base}${url.startsWith('/') ? '' : '/'}${url}`;
+};
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,

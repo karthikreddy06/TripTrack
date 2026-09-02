@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
-import { wishlistAPI } from '../services/api';
+import { wishlistAPI, resolveImageUrl } from '../services/api';
 
 const getCategoryIcon = (category) => {
   switch (category?.toLowerCase()) {
@@ -108,7 +108,8 @@ export const PlaceCard = ({
     ? `/explore/${encodeURIComponent(place.name.toLowerCase())}`
     : `/explore/place/${encodeURIComponent(place.place_id)}`;
 
-  const photoUrl = (!imgError && (place.image_url || (place.photos && place.photos.length > 0 ? place.photos[0] : null))) || null;
+  const rawPhoto = (!imgError && (place.image_url || (place.photos && place.photos.length > 0 ? place.photos[0] : null))) || null;
+  const photoUrl = resolveImageUrl(rawPhoto);
 
   return (
     <div

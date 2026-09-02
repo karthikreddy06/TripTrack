@@ -12,7 +12,7 @@ import {
   CameraOff,
   Navigation
 } from 'lucide-react';
-import { exploreAPI, wishlistAPI, extractErrorMessage } from '../services/api';
+import { exploreAPI, wishlistAPI, resolveImageUrl, extractErrorMessage } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { PlaceCard } from '../components/PlaceCard';
@@ -147,12 +147,13 @@ export const PlaceDetail = () => {
     );
   }
 
-  const photosList = placeData.photos && placeData.photos.length > 0
+  const rawPhotos = placeData.photos && placeData.photos.length > 0
     ? placeData.photos
     : placeData.image_url
     ? [placeData.image_url]
     : [];
 
+  const photosList = rawPhotos.map(resolveImageUrl).filter(Boolean);
   const currentPhoto = photosList[activePhotoIndex] || null;
 
   return (
