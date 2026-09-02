@@ -1,13 +1,15 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { 
   Search, 
   LayoutGrid, 
   List, 
   Compass,
-  ArrowUpRight
+  ArrowUpRight,
+  Sparkles
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
 import { tripsAPI, extractErrorMessage } from '../services/api';
 import { TripCard } from '../components/TripCard';
 import { TripTable } from '../components/TripTable';
@@ -16,12 +18,12 @@ import { Alert } from '../components/Alert';
 
 export const MyTrips = () => {
   const { user } = useAuth();
+  const { showSuccess, showError } = useToast();
   const navigate = useNavigate();
 
   const [trips, setTrips] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [successMessage, setSuccessMessage] = useState(null);
 
   // Filters & display state
   const [searchQuery, setSearchQuery] = useState('');
@@ -33,7 +35,7 @@ export const MyTrips = () => {
   const [tripToDelete, setTripToDelete] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  const fetchTrips = async () => {
+  const fetchTrips = useCallback(async () => {
     if (!user?.user_id) return;
     try {
       setLoading(true);
@@ -45,11 +47,11 @@ export const MyTrips = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [user?.user_id]);
 
   useEffect(() => {
     fetchTrips();
-  }, [user?.user_id]);
+  }, [fetchTrips]);
 
   const handleEdit = (trip) => {
     navigate(`/trips/${trip._id}/edit`, { state: { trip } });
@@ -65,10 +67,9 @@ export const MyTrips = () => {
       await tripsAPI.deleteTrip(trip._id);
       setTrips((prev) => prev.filter((t) => t._id !== trip._id));
       setTripToDelete(null);
-      setSuccessMessage(`Trip to ${trip.destination} was deleted successfully.`);
-      setTimeout(() => setSuccessMessage(null), 4000);
+      showSuccess(`Trip to ${trip.destination} was deleted successfully.`);
     } catch (err) {
-      setError(extractErrorMessage(err));
+      showError(extractErrorMessage(err));
     } finally {
       setIsDeleting(false);
     }
@@ -76,11 +77,12 @@ export const MyTrips = () => {
 
   // Filter and sort computation
   const filteredTrips = useMemo(() => {
+    const q = searchQuery.toLowerCase().trim();
     return trips
       .filter((trip) => {
-        const matchesSearch = trip.destination
-          ?.toLowerCase()
-          .includes(searchQuery.toLowerCase().trim());
+        const destMatch = trip.destination?.toLowerCase().includes(q);
+        const titleMatch = trip.title?.toLowerCase().includes(q);
+        const matchesSearch = !q || destMatch || titleMatch;
         const matchesStatus =
           statusFilter === 'all' ? true : trip.status === statusFilter;
         return matchesSearch && matchesStatus;
@@ -110,12 +112,16 @@ export const MyTrips = () => {
           <div className="editorial-mark">
             <i></i> 02 / ITINERARIES
           </div>
-          <h1>My trips</h1>
+          <h1>My journeys</h1>
           <p className="welcome-subtitle">
-            Every destination, date and detail in one place.
+            Every destination, date, activity, and expense cap in one calm space.
           </p>
         </div>
-        <div>
+        <div style={{ display: 'flex', gap: '0.65rem' }}>
+          <Link to="/ai-planner" className="btn btn-secondary">
+            <Sparkles size={14} style={{ color: 'var(--primary-green)' }} />
+            <span>AI Planner</span>
+          </Link>
           <Link to="/trips/new" className="btn btn-primary">
             <span>Create Trip</span>
             <ArrowUpRight size={15} />
@@ -124,9 +130,6 @@ export const MyTrips = () => {
       </div>
 
       {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
-      {successMessage && (
-        <Alert type="success" message={successMessage} onClose={() => setSuccessMessage(null)} />
-      )}
 
       {/* Toolbar: Search, Filters, Sorting, View mode */}
       <div className="trips-toolbar">
@@ -135,7 +138,7 @@ export const MyTrips = () => {
           <input
             type="text"
             className="form-input"
-            placeholder="Search destination..."
+            placeholder="Search destination or title..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
@@ -204,19 +207,25 @@ export const MyTrips = () => {
           </div>
           <h3 className="empty-title">No journeys yet.</h3>
           <p className="empty-desc">
-            Your next adventure starts here.
+            Your next adventure starts here. Add your upcoming destination, dates, and budget.
           </p>
-          <Link to="/trips/new" className="btn btn-primary">
-            <span>Create your first trip</span>
-            <ArrowUpRight size={15} />
-          </Link>
+          <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
+            <Link to="/trips/new" className="btn btn-primary">
+              <span>Create your first trip</span>
+              <ArrowUpRight size={15} />
+            </Link>
+            <Link to="/ai-planner" className="btn btn-secondary">
+              <Sparkles size={14} style={{ color: 'var(--primary-green)' }} />
+              <span>Plan with AI</span>
+            </Link>
+          </div>
         </div>
       ) : filteredTrips.length === 0 ? (
         <div className="empty-state">
           <div className="empty-icon-wrapper">
             <Search size={24} />
           </div>
-          <h3 className="empty-title">No matching trips found</h3>
+          <h3 className="empty-title">No matching journeys found</h3>
           <p className="empty-desc">
             No itineraries matched "{searchQuery}".
           </p>

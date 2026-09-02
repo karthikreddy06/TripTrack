@@ -53,11 +53,27 @@ export const Navbar = () => {
             </NavLink>
 
             <NavLink
+              to="/ai-planner"
+              className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
+              onClick={() => setMobileMenuOpen(false)}
+            >
+              AI Planner
+            </NavLink>
+
+            <NavLink
               to="/trips/new"
               className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
               onClick={() => setMobileMenuOpen(false)}
             >
               Create Trip
+            </NavLink>
+
+            <NavLink
+              to="/profile"
+              className={({ isActive }) => `nav-link ${isActive ? 'active' : ''} mobile-only-link`}
+              onClick={() => setMobileMenuOpen(false)}
+            >
+              Profile Settings
             </NavLink>
           </div>
         )}
@@ -65,12 +81,16 @@ export const Navbar = () => {
         <div className="nav-user">
           {isAuthenticated ? (
             <>
-              <div className="user-pill" title={`Logged in as ${user?.email}`}>
+              <Link
+                to="/profile"
+                className="user-pill"
+                title={`Logged in as ${user?.email} • View Profile`}
+              >
                 <div className="user-avatar">
                   {getInitials(user?.name)}
                 </div>
                 <span>{user?.name || 'Traveler'}</span>
-              </div>
+              </Link>
 
               <button
                 type="button"

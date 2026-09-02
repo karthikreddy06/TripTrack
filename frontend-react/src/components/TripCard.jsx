@@ -1,3 +1,5 @@
+import { Link } from 'react-router-dom';
+import { Users, Calendar, ArrowUpRight } from 'lucide-react';
 import { StatusBadge } from './StatusBadge';
 
 export const TripCard = ({ trip, onEdit, onDelete }) => {
@@ -41,26 +43,48 @@ export const TripCard = ({ trip, onEdit, onDelete }) => {
   };
 
   const duration = calculateDuration(trip.start_date, trip.end_date);
+  const displayTitle = trip.title || trip.destination;
+  const subtitle = trip.title && trip.title !== trip.destination ? trip.destination : null;
 
   return (
     <div className="trip-card">
       <div className="trip-card-header">
-        <h3 className="trip-destination" title={trip.destination}>
-          {trip.destination}
-        </h3>
+        <div>
+          <Link to={`/trips/${trip._id}`} className="trip-destination-link" title={displayTitle}>
+            <h3 className="trip-destination">
+              {displayTitle}
+            </h3>
+          </Link>
+          {subtitle && (
+            <span className="trip-sub-destination">{subtitle}</span>
+          )}
+        </div>
         <StatusBadge status={trip.status} />
       </div>
 
       <div className="trip-card-body">
         <div className="trip-dates">
+          <Calendar size={13} style={{ opacity: 0.7 }} />
           <span>
             {formatDate(trip.start_date)} — {formatDate(trip.end_date)}
           </span>
         </div>
 
+        {trip.description && (
+          <p className="trip-card-description">
+            {trip.description}
+          </p>
+        )}
+
         <div className="trip-details-row">
-          <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
             <span className="trip-duration">{duration}</span>
+            {trip.travelers > 1 && (
+              <span className="trip-travelers-tag" title={`${trip.travelers} travelers`}>
+                <Users size={11} />
+                <span>{trip.travelers}</span>
+              </span>
+            )}
           </div>
           <div className="trip-budget" title={`Budget: ${formatCurrency(trip.budget)}`}>
             {formatCurrency(trip.budget)}
@@ -69,6 +93,15 @@ export const TripCard = ({ trip, onEdit, onDelete }) => {
       </div>
 
       <div className="trip-card-footer">
+        <Link
+          to={`/trips/${trip._id}`}
+          className="btn btn-secondary btn-sm"
+          title="Open trip itinerary and budget details"
+        >
+          <span>View Details</span>
+          <ArrowUpRight size={12} />
+        </Link>
+
         <button
           type="button"
           className="btn btn-secondary btn-sm"

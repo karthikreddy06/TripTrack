@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import { ArrowLeft, ArrowUpRight } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
 import { tripsAPI, extractErrorMessage } from '../services/api';
 import { Alert } from '../components/Alert';
 
@@ -10,13 +11,18 @@ export const EditTrip = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { showSuccess } = useToast();
 
   const [formData, setFormData] = useState({
     destination: '',
+    title: '',
     start_date: '',
     end_date: '',
     status: 'planned',
     budget: '',
+    travelers: 1,
+    description: '',
+    notes: '',
   });
 
   const [fetching, setFetching] = useState(true);
@@ -30,33 +36,34 @@ export const EditTrip = () => {
         const t = location.state.trip;
         setFormData({
           destination: t.destination || '',
+          title: t.title || '',
           start_date: t.start_date || '',
           end_date: t.end_date || '',
           status: t.status || 'planned',
           budget: t.budget !== undefined ? String(t.budget) : '',
+          travelers: t.travelers || 1,
+          description: t.description || '',
+          notes: t.notes || '',
         });
         setFetching(false);
         return;
       }
 
-      // 2. Otherwise, fetch user trips and locate by id
-      if (!user?.user_id) return;
-
+      // 2. Otherwise fetch via single trip endpoint or user trips
       try {
         setFetching(true);
-        const trips = await tripsAPI.getTrips(user.user_id);
-        const match = trips.find((t) => t._id === id);
-        if (!match) {
-          setError('Trip not found or you do not have permission to edit it.');
-        } else {
-          setFormData({
-            destination: match.destination || '',
-            start_date: match.start_date || '',
-            end_date: match.end_date || '',
-            status: match.status || 'planned',
-            budget: match.budget !== undefined ? String(match.budget) : '',
-          });
-        }
+        const trip = await tripsAPI.getSingleTrip(id);
+        setFormData({
+          destination: trip.destination || '',
+          title: trip.title || '',
+          start_date: trip.start_date || '',
+          end_date: trip.end_date || '',
+          status: trip.status || 'planned',
+          budget: trip.budget !== undefined ? String(trip.budget) : '',
+          travelers: trip.travelers || 1,
+          description: trip.description || '',
+          notes: trip.notes || '',
+        });
       } catch (err) {
         setError(extractErrorMessage(err));
       } finally {
@@ -103,13 +110,18 @@ export const EditTrip = () => {
     try {
       await tripsAPI.updateTrip(id, {
         destination: formData.destination.trim(),
+        title: formData.title.trim() || undefined,
         start_date: formData.start_date,
         end_date: formData.end_date,
         status: formData.status,
         budget: numericBudget,
+        travelers: parseInt(formData.travelers, 10) || 1,
+        description: formData.description.trim(),
+        notes: formData.notes.trim(),
       });
 
-      navigate('/trips');
+      showSuccess(`Trip updated successfully!`);
+      navigate(`/trips/${id}`);
     } catch (err) {
       setError(extractErrorMessage(err));
     } finally {
@@ -130,7 +142,7 @@ export const EditTrip = () => {
     <div className="main-content">
       <div className="form-page-container">
         <Link
-          to="/trips"
+          to={`/trips/${id}`}
           style={{
             display: 'inline-flex',
             alignItems: 'center',
@@ -145,7 +157,7 @@ export const EditTrip = () => {
           }}
         >
           <ArrowLeft size={14} />
-          <span>Back to itineraries</span>
+          <span>Back to trip details</span>
         </Link>
 
         <div className="card">
@@ -155,26 +167,43 @@ export const EditTrip = () => {
             </div>
             <h1>Refine your journey.</h1>
             <p style={{ color: 'var(--text-secondary)', fontSize: '0.95rem' }}>
-              Update dates, destination, budget, or status for this itinerary.
+              Update dates, destination, budget, travelers, or notes for this itinerary.
             </p>
           </div>
 
           {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
 
           <form onSubmit={handleSubmit}>
-            <div className="form-group">
-              <label className="form-label" htmlFor="edit-destination">
-                DESTINATION <span style={{ color: 'var(--accent)' }}>*</span>
-              </label>
-              <input
-                id="edit-destination"
-                type="text"
-                name="destination"
-                className="form-input"
-                value={formData.destination}
-                onChange={handleChange}
-                required
-              />
+            <div className="form-grid-two">
+              <div className="form-group">
+                <label className="form-label" htmlFor="edit-destination">
+                  DESTINATION <span style={{ color: 'var(--accent)' }}>*</span>
+                </label>
+                <input
+                  id="edit-destination"
+                  type="text"
+                  name="destination"
+                  className="form-input"
+                  value={formData.destination}
+                  onChange={handleChange}
+                  required
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label" htmlFor="edit-title">
+                  TRIP TITLE (OPTIONAL)
+                </label>
+                <input
+                  id="edit-title"
+                  type="text"
+                  name="title"
+                  className="form-input"
+                  placeholder="e.g. Kyoto Autumn Tour"
+                  value={formData.title}
+                  onChange={handleChange}
+                />
+              </div>
             </div>
 
             <div className="form-grid-two">
@@ -210,7 +239,7 @@ export const EditTrip = () => {
               </div>
             </div>
 
-            <div className="form-grid-two">
+            <div className="form-grid-three">
               <div className="form-group">
                 <label className="form-label" htmlFor="edit-status">
                   STATUS
@@ -245,10 +274,56 @@ export const EditTrip = () => {
                   required
                 />
               </div>
+
+              <div className="form-group">
+                <label className="form-label" htmlFor="edit-travelers">
+                  TRAVELERS
+                </label>
+                <input
+                  id="edit-travelers"
+                  type="number"
+                  min="1"
+                  max="100"
+                  name="travelers"
+                  className="form-input"
+                  value={formData.travelers}
+                  onChange={handleChange}
+                />
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label" htmlFor="edit-description">
+                TRIP OVERVIEW / SUMMARY (OPTIONAL)
+              </label>
+              <textarea
+                id="edit-description"
+                name="description"
+                className="form-input"
+                rows={2}
+                placeholder="Brief summary of highlights or companion notes..."
+                value={formData.description}
+                onChange={handleChange}
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label" htmlFor="edit-notes">
+                PACKING & PREPARATION NOTES (OPTIONAL)
+              </label>
+              <textarea
+                id="edit-notes"
+                name="notes"
+                className="form-input"
+                rows={3}
+                placeholder="Flight codes, booking refs, visa notes, emergency contacts..."
+                value={formData.notes}
+                onChange={handleChange}
+              />
             </div>
 
             <div className="form-actions">
-              <Link to="/trips" className="btn btn-secondary">
+              <Link to={`/trips/${id}`} className="btn btn-secondary">
                 Cancel
               </Link>
               <button

@@ -43,9 +43,16 @@ export const TripTable = ({ trips, onEdit, onDelete }) => {
           {trips.map((trip) => (
             <tr key={trip._id}>
               <td>
-                <span className="table-destination-title">
-                  {trip.destination}
-                </span>
+                <Link to={`/trips/${trip._id}`} className="table-destination-link" title={trip.title || trip.destination}>
+                  <span className="table-destination-title">
+                    {trip.title || trip.destination}
+                  </span>
+                </Link>
+                {trip.title && trip.title !== trip.destination && (
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                    {trip.destination}
+                  </div>
+                )}
               </td>
               <td>
                 <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.775rem', color: 'var(--text-secondary)' }}>
@@ -62,6 +69,13 @@ export const TripTable = ({ trips, onEdit, onDelete }) => {
               </td>
               <td>
                 <div className="table-actions" style={{ justifyContent: 'flex-end' }}>
+                  <Link
+                    to={`/trips/${trip._id}`}
+                    className="btn btn-secondary btn-sm"
+                    title="View itinerary & budget"
+                  >
+                    View
+                  </Link>
                   <button
                     type="button"
                     className="btn btn-secondary btn-sm"
