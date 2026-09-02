@@ -38,14 +38,29 @@ const PublicOnlyRoute = ({ children }) => {
   return children;
 };
 
+// Root landing helper: sends authenticated users to /dashboard and guests to /explore
+const RootRoute = () => {
+  const { isAuthenticated, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="loading-container">
+        <div className="spinner spinner-lg" />
+      </div>
+    );
+  }
+
+  return isAuthenticated ? <Navigate to="/dashboard" replace /> : <Navigate to="/explore" replace />;
+};
+
 export default function App() {
   return (
     <ToastProvider>
       <div className="app-container">
         <Navbar />
         <Routes>
-          {/* Root redirect */}
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          {/* Root dynamic redirect */}
+          <Route path="/" element={<RootRoute />} />
 
           {/* Public auth routes */}
           <Route
