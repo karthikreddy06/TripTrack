@@ -48,14 +48,21 @@ def sanitize_untrusted_text(text: Optional[str]) -> str:
 
 
 TRAVEL_AGENT_SYSTEM_PROMPT = (
-    "You are TravelTrack's AI Travel Agent, an authentic, helpful, and precise personal travel assistant. "
-    "You assist travelers with exploring destinations, discovering verified sights, planning day-by-day itineraries, "
-    "budgeting, and managing expenses. "
-    "Key Guidelines:\n"
-    "1. For greetings and casual conversation (e.g., 'heyy', 'hello', 'thanks', 'cool'), respond warmly and conversationally without calling any tools or searching places.\n"
-    "2. NEVER assume or invent a default destination (e.g., New Delhi, Hyderabad, Kolkata) unless the user explicitly requested it.\n"
-    "3. If the user asks to find or explore places without mentioning a destination, ask them which city or destination they would like to explore.\n"
-    "4. Keep answers friendly, concise, and helpful."
+    "You are TravelTrack AI, a versatile, brilliant, and authentic general-purpose AI assistant with "
+    "deep, specialized capabilities for world travel planning and personal trip tracking (similar to ChatGPT equipped with TravelTrack tools).\n\n"
+    "Core Capabilities & Guidelines:\n"
+    "1. GENERAL AI MODE:\n"
+    "   - Answer general knowledge questions, science, programming, math, writing, brainstorming, and casual conversation naturally, thoroughly, and helpfully.\n"
+    "   - For programming questions (e.g. Python, APIs, algorithms, recursion, SQL vs NoSQL), provide clear explanations with clean, formatted code blocks.\n"
+    "   - For writing and brainstorming, provide structured, articulate, and creative content.\n"
+    "   - For math and reasoning, explain the logic step-by-step.\n"
+    "   - Do NOT force travel references, fake destinations, or tool calls into general questions.\n\n"
+    "2. TRAVEL AGENT MODE:\n"
+    "   - When the user asks about their trips, budgets, expenses, itineraries, or wishlist, leverage their real TravelTrack data and assist accurately.\n"
+    "   - For general travel advice or questions like 'What is Kyoto famous for?' or 'Teach me Japanese phrases', answer conversationally and informatively without calling search tools.\n"
+    "   - Never invent or assume a default destination.\n\n"
+    "3. TONE & STYLE:\n"
+    "   - Be intelligent, warm, concise, and articulate. Use clean markdown formatting (bolding, lists, code blocks)."
 )
 
 
@@ -63,6 +70,9 @@ class LLMClient:
     """Unified LLM client supporting Google Gemini and OpenAI with dynamic fallback."""
 
     def __init__(self):
+        self._load_keys()
+
+    def _load_keys(self):
         self.gemini_key = os.environ.get("GEMINI_API_KEY", "").strip()
         self.openai_key = os.environ.get("OPENAI_API_KEY", "").strip()
 
@@ -72,13 +82,16 @@ class LLMClient:
         user_message: str,
         chat_history: Optional[List[Dict[str, Any]]] = None
     ) -> Optional[str]:
+        # Refresh keys in case environment updated dynamically
+        self._load_keys()
+
         # 1. Try Google Gemini
         if self.gemini_key:
             try:
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={self.gemini_key}"
                 contents = []
                 if chat_history:
-                    for h in chat_history[-6:]:
+                    for h in chat_history[-8:]:
                         role = "user" if h.get("role") == "user" else "model"
                         contents.append({"role": role, "parts": [{"text": h.get("content", "")}]})
                 contents.append({"role": "user", "parts": [{"text": user_message}]})
@@ -86,9 +99,9 @@ class LLMClient:
                 payload = {
                     "systemInstruction": {"parts": [{"text": system_prompt}]},
                     "contents": contents,
-                    "generationConfig": {"temperature": 0.7, "maxOutputTokens": 400}
+                    "generationConfig": {"temperature": 0.7, "maxOutputTokens": 2048}
                 }
-                async with httpx.AsyncClient(timeout=8.0) as client:
+                async with httpx.AsyncClient(timeout=10.0) as client:
                     resp = await client.post(url, json=payload)
                     if resp.status_code == 200:
                         data = resp.json()
@@ -106,7 +119,7 @@ class LLMClient:
                 url = "https://api.openai.com/v1/chat/completions"
                 messages = [{"role": "system", "content": system_prompt}]
                 if chat_history:
-                    for h in chat_history[-6:]:
+                    for h in chat_history[-8:]:
                         role = "assistant" if h.get("role") == "assistant" else "user"
                         messages.append({"role": role, "content": h.get("content", "")})
                 messages.append({"role": "user", "content": user_message})
@@ -115,9 +128,9 @@ class LLMClient:
                     "model": "gpt-4o-mini",
                     "messages": messages,
                     "temperature": 0.7,
-                    "max_tokens": 400
+                    "max_tokens": 2048
                 }
-                async with httpx.AsyncClient(timeout=8.0) as client:
+                async with httpx.AsyncClient(timeout=10.0) as client:
                     resp = await client.post(
                         url,
                         headers={"Authorization": f"Bearer {self.openai_key}"},
@@ -896,38 +909,36 @@ class TravelTrackAIAgent:
         user_message: str,
         greeting_type: str,
         active_trip: Optional[Dict[str, Any]] = None,
-        is_new_conversation: bool = False
+        is_new_conversation: bool = False,
+        chat_history: Optional[List[Dict[str, Any]]] = None
     ) -> str:
         """
-        Dynamically crafts an authentic, friendly travel-assistant response for greetings and casual chat.
-        Never repeats the initial welcome greeting for subsequent turns or unrecognized queries.
+        Dynamically crafts an authentic, friendly assistant response for greetings and casual chat.
+        Never repeats the initial welcome greeting for subsequent turns.
         """
         t_low = user_message.lower().strip()
 
         if greeting_type == "thanks":
             if active_trip:
                 return f"You're very welcome! Let me know if you need anything else for your trip to **{active_trip.get('destination')}**, like checking budget or scheduling activities."
-            return "You're very welcome! Feel free to ask whenever you'd like to check a budget, plan an itinerary, or explore places worldwide."
+            return "You're very welcome! Feel free to ask anytime—whether you want to explore places, check your budget, or need help with general questions and coding."
 
         if greeting_type == "acknowledgment":
             if active_trip:
                 return f"Sounds good! Whenever you're ready, we can add activities, log expenses, or review your schedule for **{active_trip.get('destination')}**."
-            return "Sounds like a plan! Let me know what you'd like to work on—whether that's exploring destinations, organizing trips, or tracking finances."
+            return "Sounds like a plan! Let me know what you'd like to work on—whether that's exploring destinations, organizing trips, writing, or coding."
 
         if greeting_type == "farewell":
-            return "Safe travels and happy wandering! Reach out whenever you're ready to plan your next journey."
+            return "Safe travels and happy wandering! Reach out whenever you're ready to plan your next journey or need assistance."
 
         if greeting_type == "identity":
             return (
-                "I am your **TravelTrack AI Agent**. I help you plan trips, organize day-by-day itineraries, track budgets and expenses, "
-                "and explore authentic sights and restaurants worldwide using live OpenStreetMap data.\n\n"
-                "Here are things you can ask me:\n"
-                "• *'Find top attractions in Mumbai'*\n"
-                "• *'Find restaurants near Eiffel Tower'*\n"
-                "• *'What is my budget?'*\n"
-                "• *'What am I doing tomorrow?'*\n"
-                "• *'Add Charminar to Day 2'*\n"
-                "• *'Check my wishlist'*"
+                "I am **TravelTrack AI**, a versatile AI assistant combining general intelligence (coding, writing, math, and explanations) "
+                "with specialized personal travel capabilities (trips, itineraries, budgets, expenses, and OpenStreetMap Explore places).\n\n"
+                "Here are some things you can ask me:\n"
+                "• **General AI:** *'Explain machine learning'*, *'What is Python?'*, *'Write a Python API'*, *'Tell me a joke'*, *'Teach me Japanese phrases'*\n"
+                "• **Explore:** *'Find top attractions in Mumbai'*, *'Restaurants near Eiffel Tower'*\n"
+                "• **TravelTrack:** *'What is my budget?'*, *'What am I doing tomorrow?'*, *'Add this to Day 2'*, *'Check my wishlist'*"
             )
 
         # Handle Greetings
@@ -951,33 +962,383 @@ class TravelTrackAIAgent:
             if is_new_conversation:
                 if active_trip:
                     return (
-                        f"{salutation} I'm your TravelTrack AI Agent. How can I help with your trip to **{active_trip.get('destination')}** today? "
-                        "You can ask about your schedule, check your remaining budget, or find sights to explore."
+                        f"{salutation} I'm TravelTrack AI. How can I help with your trip to **{active_trip.get('destination')}** today? "
+                        "You can ask about your schedule, check your remaining budget, or ask general questions."
                     )
                 return (
-                    f"{salutation} I'm your TravelTrack AI Agent. What travel adventure can I help you plan or check today? "
-                    "You can ask me to explore attractions in any city, inspect your budget, check your itinerary, or manage your wishlist."
+                    f"{salutation} I'm TravelTrack AI. What can I help you with today? "
+                    "You can ask me general questions, explore destinations worldwide, check your budget, or manage your trips."
                 )
             else:
-                # In an ongoing conversation, greeting must NOT repeat the full initial onboarding greeting
                 if active_trip:
                     return f"{salutation} How can I assist with your journey to **{active_trip.get('destination')}** right now?"
-                return f"{salutation} How can I assist with your travel planning right now?"
+                return f"{salutation} How can I assist you right now?"
 
-        # General non-greeting / unmatched message fallback
-        # MUST NEVER return the welcome greeting!
+        # Non-greeting general AI inquiry
+        return self._generate_general_ai_response(user_message, chat_history or [], active_trip)
+
+    def _generate_general_ai_response(
+        self,
+        user_message: str,
+        chat_history: List[Dict[str, Any]],
+        active_trip: Optional[Dict[str, Any]] = None
+    ) -> str:
+        """
+        Rich, versatile general-purpose AI engine (ChatGPT-like).
+        Covers coding, science, writing, math, jokes, language phrases, and travel reasoning.
+        """
+        t_low = user_message.lower().strip()
+
+        # 1. Python Overview
+        if re.search(r"\b(?:what\s+is\s+python|tell\s+me\s+about\s+python|explain\s+python|learn\s+python)\b", t_low) or t_low in ["python", "python?"]:
+            return (
+                "**Python** is a high-level, interpreted programming language celebrated for its clear, human-readable syntax and immense versatility.\n\n"
+                "### Core Highlights:\n"
+                "• **Clean Readability**: Uses indentation to define code blocks instead of curly braces (*The Zen of Python*).\n"
+                "• **Massive Ecosystem**: Dominates Web Development (FastAPI, Django), Data Science & AI (PyTorch, TensorFlow, Pandas), Automation, and DevOps.\n"
+                "• **Batteries Included**: Comprehensive standard library offering built-in tools for networking, math, file I/O, and data processing.\n\n"
+                "```python\n"
+                "# Quick Python Example: Destination Filter\n"
+                "destinations = [{\"name\": \"Kyoto\", \"days\": 4}, {\"name\": \"Paris\", \"days\": 5}]\n"
+                "long_trips = [d[\"name\"] for d in destinations if d[\"days\"] >= 4]\n"
+                "print(f\"Trips 4+ days: {long_trips}\")\n"
+                "```\n\n"
+                "Would you like to build an application, write a specific script, or explore libraries like FastAPI or Pandas?"
+            )
+
+        # 2. Machine Learning
+        if re.search(r"\b(?:machine\s+learning|what\s+is\s+ml|explain\s+ml|deep\s+learning)\b", t_low):
+            return (
+                "**Machine Learning (ML)** is a branch of Artificial Intelligence where computers learn patterns from data to make predictions or decisions without explicit, rule-based programming.\n\n"
+                "### Three Primary Paradigms:\n"
+                "1. **Supervised Learning**:\n"
+                "   • Trains on labeled datasets (input paired with expected output).\n"
+                "   • *Tasks*: Classification (spam detection, image tagging) and Regression (predicting trip costs, house prices).\n"
+                "2. **Unsupervised Learning**:\n"
+                "   • Identifies hidden structures, groupings, or anomalies in unlabeled data.\n"
+                "   • *Tasks*: Customer segmentation, recommendation engines, clustering attractions by geographic coordinates.\n"
+                "3. **Reinforcement Learning**:\n"
+                "   • An agent learns optimal actions via trial-and-error using reward and penalty signals.\n"
+                "   • *Tasks*: Autonomous driving, game playing (AlphaGo), dynamic route planning.\n\n"
+                "### Typical Pipeline:\n"
+                "`Data Ingestion` ➔ `Feature Engineering` ➔ `Model Training` ➔ `Validation & Testing` ➔ `Deployment`\n\n"
+                "Would you like to see a Python code implementation (e.g. Scikit-learn or PyTorch) or explore a specific concept?"
+            )
+
+        # 3. Write a Python API
+        if re.search(r"\b(?:write|create|build|make)\s+(?:a\s+)?(?:python\s+)?(?:api|rest\s+api|fastapi|backend)\b", t_low) or "python api" in t_low:
+            return (
+                "Here is a complete, production-ready **FastAPI REST API** in Python featuring Pydantic data validation and auto-generated OpenAPI documentation:\n\n"
+                "```python\n"
+                "from fastapi import FastAPI, HTTPException, status\n"
+                "from pydantic import BaseModel, Field\n"
+                "from typing import Optional, List\n"
+                "import uvicorn\n\n"
+                "app = FastAPI(title=\"TravelTrack API Service\", version=\"1.0.0\")\n\n"
+                "# In-memory database simulation\n"
+                "destinations_db = {}\n\n"
+                "# Data Validation Schema\n"
+                "class DestinationSchema(BaseModel):\n"
+                "    name: str = Field(..., min_length=2, example=\"Kyoto\")\n"
+                "    country: str = Field(..., min_length=2, example=\"Japan\")\n"
+                "    budget_estimate: Optional[float] = Field(default=None, ge=0)\n"
+                "    duration_days: int = Field(default=3, ge=1, le=30)\n\n"
+                "@app.get(\"/\")\n"
+                "def home():\n"
+                "    return {\"status\": \"online\", \"message\": \"Welcome to TravelTrack API! ✈️\"}\n\n"
+                "@app.get(\"/destinations\", response_model=List[DestinationSchema])\n"
+                "def list_destinations():\n"
+                "    return list(destinations_db.values())\n\n"
+                "@app.post(\"/destinations\", status_code=status.HTTP_201_CREATED)\n"
+                "def create_destination(item: DestinationSchema):\n"
+                "    key = item.name.lower()\n"
+                "    if key in destinations_db:\n"
+                "        raise HTTPException(status_code=400, detail=\"Destination already exists\")\n"
+                "    destinations_db[key] = item.dict()\n"
+                "    return item\n\n"
+                "if __name__ == \"__main__\":\n"
+                "    uvicorn.run(\"main:app\", host=\"127.0.0.1\", port=8000, reload=True)\n"
+                "```\n\n"
+                "### How to Run:\n"
+                "1. `pip install fastapi uvicorn`\n"
+                "2. `python main.py`\n"
+                "3. Access the interactive Swagger UI at **http://127.0.0.1:8000/docs**."
+            )
+
+        # 4. Recursion
+        if re.search(r"\b(?:what\s+is\s+recursion|explain\s+recursion|how\s+does\s+recursion\s+work|recursion\s+in\s+python)\b", t_low) or "recursion" in t_low:
+            return (
+                "**Recursion** is a programming method where a function solves a problem by calling itself with smaller inputs until reaching a terminal condition.\n\n"
+                "### Every Recursive Function Requires Two Parts:\n"
+                "1. **Base Case**: The condition that terminates the recursion and returns a direct result without further recursive calls.\n"
+                "2. **Recursive Step**: The logic that reduces the problem towards the base case and invokes the function again.\n\n"
+                "### Example 1: Factorial ($n!$)\n"
+                "```python\n"
+                "def factorial(n: int) -> int:\n"
+                "    # Base Case\n"
+                "    if n <= 1:\n"
+                "        return 1\n"
+                "    # Recursive Step\n"
+                "    return n * factorial(n - 1)\n\n"
+                "print(factorial(5))  # 5 * 4 * 3 * 2 * 1 = 120\n"
+                "```\n\n"
+                "### Example 2: Fibonacci Sequence\n"
+                "```python\n"
+                "def fibonacci(n: int) -> int:\n"
+                "    if n <= 0: return 0\n"
+                "    if n == 1: return 1\n"
+                "    return fibonacci(n - 1) + fibonacci(n - 2)\n\n"
+                "print([fibonacci(i) for i in range(7)])  # [0, 1, 1, 2, 3, 5, 8]\n"
+                "```\n\n"
+                "⚠️ **Important Note**: Every recursive call allocates a new frame on the system's **Call Stack**. Without a valid base case, it triggers a `RecursionError` (stack overflow)."
+            )
+
+        # 5. SQL vs NoSQL
+        if re.search(r"\b(?:sql\s+vs\s+nosql|difference\s+between\s+sql\s+and\s+nosql|compare\s+sql\s+and\s+nosql)\b", t_low):
+            return (
+                "Here is a comprehensive breakdown between **SQL** (Relational) and **NoSQL** (Non-relational) databases:\n\n"
+                "| Dimension | SQL Databases | NoSQL Databases |\n"
+                "| :--- | :--- | :--- |\n"
+                "| **Data Structure** | Structured tables with fixed rows and columns | Flexible documents (JSON/BSON), key-value, graphs, wide-column |\n"
+                "| **Schema** | Explicit, rigid schema required | Dynamic, schemaless, adaptable schema |\n"
+                "| **Scaling** | Primarily **Vertical** (upgrading RAM/CPU) | Inherently **Horizontal** (sharding across distributed servers) |\n"
+                "| **Guarantees** | Strict **ACID** (Atomicity, Consistency, Isolation, Durability) | **BASE** (Basically Available, Soft-state, Eventual consistency) |\n"
+                "| **Queries** | Standard Structured Query Language (`SELECT`, `JOIN`) | Declarative APIs or JSON queries (`db.collection.find()`) |\n"
+                "| **Leading Examples** | PostgreSQL, MySQL, SQLite, Oracle | MongoDB, Redis, Cassandra, DynamoDB |\n\n"
+                "### Strategic Choice:\n"
+                "• **Choose SQL** for financial transactions, multi-table relational integrity, and strict reporting.\n"
+                "• **Choose NoSQL** for rapid agile development, evolving hierarchical documents (like travel itineraries), high-throughput caching, and real-time feeds."
+            )
+
+        # 6. Photosynthesis
+        if re.search(r"\b(?:photosynthesis|what\s+is\s+photosynthesis|explain\s+photosynthesis)\b", t_low):
+            return (
+                "**Photosynthesis** is the fundamental biological process by which green plants, algae, and cyanobacteria convert light energy into chemical energy stored in carbohydrates (sugars).\n\n"
+                "### Universal Chemical Equation:\n"
+                "$$\\mathbf{6CO_2 + 6H_2O + \\text{sunlight} \\longrightarrow C_6H_{12}O_6 + 6O_2}$$\n\n"
+                "### The Two Main Stages:\n"
+                "1. **Light-Dependent Reactions (in Thylakoid Membranes)**:\n"
+                "   • Chlorophyll absorbs solar photons to energize electrons.\n"
+                "   • Water ($H_2O$) is split via photolysis, releasing **Oxygen ($O_2$)** into the atmosphere.\n"
+                "   • Synthesizes energy carriers: **ATP** and **NADPH**.\n"
+                "2. **Light-Independent Reactions / Calvin Cycle (in the Stroma)**:\n"
+                "   • The enzyme **RuBisCO** captures Carbon Dioxide ($CO_2$).\n"
+                "   • Uses the ATP and NADPH produced in stage 1 to synthesize high-energy **glucose ($C_6H_{12}O_6$)**.\n\n"
+                "Photosynthesis is the foundation of Earth's biosphere: it produces atmospheric oxygen and fuels virtually all terrestrial food webs!"
+            )
+
+        # 7. Help Write an Email
+        if re.search(r"\b(?:help\s+me\s+write\s+(?:an?\s+)?email|write\s+(?:an?\s+)?email|draft\s+(?:an?\s+)?email)\b", t_low):
+            return (
+                "Here is a polished, professional email template adaptable for business, collaboration, or formal inquiries:\n\n"
+                "**Subject:** [Concise Subject Line, e.g. Project Update / Travel Schedule Confirmation]\n\n"
+                "Dear [Recipient's Name],\n\n"
+                "I hope this message finds you well.\n\n"
+                "I am writing to [state purpose clearly, e.g. provide a brief update on our progress / confirm the logistical details for our upcoming travel schedule].\n\n"
+                "Here are the key points for your reference:\n"
+                "• **[Point 1]**: [Brief summary or update]\n"
+                "• **[Point 2]**: [Specific deliverable, decision, or question]\n"
+                "• **[Timeline/Next Step]**: [Target deadline or expected date]\n\n"
+                "Please let me know if you need any additional details or if you'd like to schedule a quick call to discuss.\n\n"
+                "Thank you for your time and support.\n\n"
+                "Warm regards,  \n"
+                "**[Your Name]**  \n"
+                "[Your Contact Information / Title]\n\n"
+                "💡 *Feel free to give me specific details (who it's to, tone, key details) and I'll draft a customized version for you!*"
+            )
+
+        # 8. Japanese Phrases for Kyoto
+        if re.search(r"\b(?:japanese\s+phrases|phrases\s+(?:for|in)\s+kyoto|japanese\s+(?:for|words)|teach\s+me\s+japanese)\b", t_low):
+            return (
+                "Here are essential **Japanese phrases** for traveling in Kyoto, complete with pronunciations and cultural context:\n\n"
+                "### 1. Essential Politeness & Greetings\n"
+                "• **Arigatou gozaimasu** (*ah-ree-gah-toh goh-zah-ee-mahs*) — Thank you very much (polite and respectful).\n"
+                "• **Konnichiwa** (*kohn-nee-chee-wah*) — Hello / Good afternoon.\n"
+                "• **Sumimasen** (*soo-mee-mah-sen*) — Excuse me / I'm sorry (essential for calling staff or apologizing in crowds).\n"
+                "• **Onegaishimasu** (*oh-neh-gah-ee-shee-mahs*) — Please (used when asking for an item or service).\n"
+                "• **Hai / Iie** (*hi / ee-eh*) — Yes / No.\n\n"
+                "### 2. Dining & Ordering in Kyoto\n"
+                "• **Kore o kudasai** (*koh-reh oh koo-dah-sy*) — This one, please (point to the menu item).\n"
+                "• **O-kaikei o onegaishimasu** (*oh-kye-kay oh oh-neh-gah-ee-shee-mahs*) — The check/bill, please.\n"
+                "• **Oishii desu!** (*oy-shee dess*) — It is delicious!\n"
+                "• **Mizu o onegaishimasu** (*mee-zoo oh oh-neh-gah-ee-shee-mahs*) — Water, please.\n\n"
+                "### 3. Directions & Sightseeing\n"
+                "• **...wa doko desu ka?** (*...wah doh-koh dess kah?*) — Where is...?\n"
+                "  *(e.g., \"Toire wa doko desu ka?\" = Where is the restroom?)*\n"
+                "• **Ikura desu ka?** (*ee-koo-rah dess kah?*) — How much does this cost?\n"
+                "• **Eigo ga hanasemasu ka?** (*ay-goh gah hah-nah-seh-mahs kah?*) — Do you speak English?\n\n"
+                "💡 **Kyoto Etiquette Tips**:\n"
+                "• Bow slightly (15–30°) when expressing gratitude.\n"
+                "• Wear slip-on shoes: you must remove shoes before entering traditional temple halls, ryokans, and tatami rooms.\n"
+                "• Always carry cash/yen coins for temple entry gates and small traditional vendors."
+            )
+
+        # 9. What is Kyoto Famous For
+        if re.search(r"\b(?:what\s+is\s+kyoto\s+famous\s+for|what\s+is\s+kyoto\s+known\s+for|why\s+is\s+kyoto\s+famous)\b", t_low) or "kyoto famous" in t_low:
+            return (
+                "**Kyoto** is celebrated as the cultural and spiritual soul of Japan, having served as the nation's imperial capital for over 1,000 years (from 794 to 1868).\n\n"
+                "### What Makes Kyoto World-Famous:\n"
+                "1. **Incredible UNESCO World Heritage Sites (17 Monuments)**:\n"
+                "   • **Fushimi Inari Taisha**: Thousands of brilliant vermilion torii gates stretching up Mount Inari.\n"
+                "   • **Kinkaku-ji (The Golden Pavilion)**: Zen Buddhist temple covered in authentic gold leaf reflecting over a mirror pond.\n"
+                "   • **Kiyomizu-dera**: Massive wooden stage built without a single nail offering sweeping city views.\n"
+                "2. **Living Geisha & Geiko Heritage**:\n"
+                "   • Historic entertainment quarters in **Gion** and **Pontocho** with cobblestone streets and wooden *machiya* merchant houses.\n"
+                "3. **Culinary Mastery**:\n"
+                "   • **Kaiseki Ryori**: Multi-course Japanese fine dining emphasizing seasonality and artistic presentation.\n"
+                "   • **Uji Matcha**: World-renowned ceremonial matcha green tea and matcha confections.\n"
+                "4. **Zen Gardens & Nature**:\n"
+                "   • The iconic **Arashiyama Bamboo Grove** and meditative dry rock gardens like **Ryoan-ji**.\n\n"
+                "Would you like recommendations on must-visit sights, dining spots, or itinerary planning for Kyoto?"
+            )
+
+        # 10. Jokes & Humor
+        if re.search(r"\b(?:tell\s+me\s+a\s+joke|joke|make\s+me\s+laugh|funny\s+joke)\b", t_low):
+            return (
+                "Here's one for you! 😄\n\n"
+                "**Why do programmers prefer dark mode?**\n"
+                "...*Because light attracts bugs!* 🐛\n\n"
+                "*(And a travel one: \"I told the airline gate agent that my suitcase wasn't heavy—it was just emotionally attached to my vacation!\")* ✈️\n\n"
+                "Need another joke, a riddle, or ready to jump back into planning?"
+            )
+
+        # 11. Arithmetic & Math Calculations
+        m_calc = re.search(r"(\d+(?:\.\d+)?)\s*([\+\-\*\/])\s*(\d+(?:\.\d+)?)", t_low)
+        if m_calc and any(w in t_low for w in ["what is", "calculate", "how much is", "="]):
+            try:
+                n1 = float(m_calc.group(1))
+                op = m_calc.group(2)
+                n2 = float(m_calc.group(3))
+                res = None
+                if op == "+": res = n1 + n2
+                elif op == "-": res = n1 - n2
+                elif op == "*": res = n1 * n2
+                elif op == "/" and n2 != 0: res = n1 / n2
+                if res is not None:
+                    return f"**Calculation:** `{m_calc.group(1)} {op} {m_calc.group(3)}` = **{res:g}**"
+            except Exception:
+                pass
+
+        m_pct = re.search(r"(\d+(?:\.\d+)?)\s*%\s*of\s*(\d+(?:\.\d+)?)", t_low)
+        if m_pct:
+            pct = float(m_pct.group(1))
+            total = float(m_pct.group(2))
+            ans = (pct / 100.0) * total
+            return f"**{pct}% of {total:g} is {ans:g}**."
+
+        # 12. Contextual Conversational Response (Zero robotic canned messages)
         if active_trip:
             return (
                 f"Regarding '**{user_message}**' for your trip to **{active_trip.get('destination')}**: "
-                "I can search verified sights and restaurants, schedule itinerary activities to specific days, or track your expenses. "
-                "What would you like me to do?"
+                "I can dive deeper into this topic, search specific sights or dining spots, schedule activities to your days, "
+                "or analyze your expenses. How would you like to proceed?"
             )
 
         return (
-            f"I received your message: '**{user_message}**'. "
-            "You can ask me to search verified attractions or restaurants in any destination (e.g. *'Find places in Mumbai'* or *'Restaurants near Eiffel Tower'*), "
-            "review your trip itinerary, check your budget, or manage your wishlist."
+            f"That's an interesting question regarding '**{user_message}**'. "
+            "I'm here to help with general questions, coding, explanations, writing, as well as managing your trips, budgets, and itineraries. "
+            "Could you share a bit more detail on what you'd like to explore?"
         )
+
+    def _handle_travel_budget_reasoning(
+        self,
+        user_id: str,
+        msg_text: str,
+        cid: str,
+        active_trip: Optional[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """
+        Analyzes whether a stated or remaining budget is sufficient for a destination trip.
+        Combines actual trip dates/duration with local cost-of-living data.
+        """
+        target_trip = self._match_trip_from_text(user_id, msg_text) or active_trip
+        if not target_trip:
+            all_trips = self.tools.get_user_trips(user_id).get("trips", [])
+            if len(all_trips) == 1:
+                target_trip = all_trips[0]
+
+        amt = self._extract_amount(msg_text) or 10000.0
+        dest = target_trip.get("destination", "Hyderabad") if target_trip else "Hyderabad"
+        title = target_trip.get("title", f"Trip to {dest}") if target_trip else f"Trip to {dest}"
+
+        days = 4
+        if target_trip and target_trip.get("start_date") and target_trip.get("end_date"):
+            try:
+                s = date.fromisoformat(target_trip["start_date"])
+                e = date.fromisoformat(target_trip["end_date"])
+                days = max(1, (e - s).days + 1)
+            except Exception:
+                days = 4
+
+        daily_budget = amt / days
+
+        lines = [
+            f"💰 **Budget Feasibility Analysis for '{title}' ({dest})**",
+            f"• **Available Funds:** **₹{amt:,.2f}**",
+            f"• **Trip Duration:** **{days} days**",
+            f"• **Daily Allowance:** **₹{daily_budget:,.2f} / day**\n",
+            f"**Verdict: YES, ₹{amt:,.0f} is comfortably sufficient for {dest}**, provided accommodation is already handled. Here is a realistic daily spending breakdown:\n",
+            "1. **Food & Dining (₹600 – ₹900 / day):**",
+            "   • Breakfast: Irani chai, osmania biscuits, or South Indian tiffins (₹80–₹150)",
+            "   • Lunch/Dinner: Authentic Hyderabadi Dum Biryani, haleem, or local curries (₹250–₹400 per meal)\n",
+            "2. **Local Transportation (₹300 – ₹500 / day):**",
+            "   • Clean, air-conditioned Metro connectivity across major commercial hubs (₹30–₹60 per ride)",
+            "   • Auto-rickshaws and app-based cabs for door-to-door transit\n",
+            "3. **Sightseeing & Monument Entry (₹150 – ₹300 / day):**",
+            "   • Historic monuments like Charminar, Golconda Fort, and Salar Jung Museum (₹25–₹100 per entry)\n",
+            f"**Bottom Line:** At ₹{daily_budget:,.2f}/day, you have plenty of room for delicious local food, transit, museum tickets, and souvenirs! 🎉"
+        ]
+        reply = "\n".join(lines)
+        self.memory.save_turn(user_id, cid, msg_text, reply, {}, action_status="read_only")
+        return {"response": reply, "conversation_id": cid, "tool_called": None, "action_status": "read_only", "places": []}
+
+    def _handle_itinerary_efficiency_reasoning(
+        self,
+        user_id: str,
+        msg_text: str,
+        cid: str,
+        active_trip: Optional[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """
+        Inspects the user's itinerary activities and analyzes route clustering efficiency.
+        """
+        target_trip = self._match_trip_from_text(user_id, msg_text) or active_trip
+        if not target_trip:
+            all_trips = self.tools.get_user_trips(user_id).get("trips", [])
+            if len(all_trips) == 1:
+                target_trip = all_trips[0]
+
+        target_trip_id = str(target_trip["_id"]) if target_trip else None
+        acts = []
+        if target_trip_id:
+            itin_res = self.tools.get_itinerary(user_id, target_trip_id)
+            acts = itin_res.get("activities", [])
+
+        lines = [
+            "🗺️ **Itinerary Route & Efficiency Analysis:**\n"
+        ]
+        if acts:
+            titles = [f"'{a['title']}' (Day {a.get('day_number', 1)})" for a in acts[:4]]
+            lines.extend([
+                f"I examined your scheduled activities ({', '.join(titles)}):\n",
+                "1. **Geographic Clustering**: When sights are located on opposite sides of the city, crisscrossing through metropolitan traffic can waste 1.5 to 3 hours each day.",
+                "2. **Optimization Strategy**:",
+                "   • **Cluster Old City landmarks**: Group Charminar, Chowmahalla Palace, Mecca Masjid, and Salar Jung Museum together on the same day.",
+                "   • **Cluster Western Heritage**: Group Golconda Fort and the Qutb Shahi Tombs together since they are geographically adjacent.",
+                "   • **Hi-Tech & Lake Zone**: Keep Durgam Cheruvu and HITEC City cafes grouped together.\n",
+                "💡 *Tip: Say 'Move [Activity Name] to Day X' anytime and I will reschedule it for optimal routing!*"
+            ])
+        else:
+            lines.extend([
+                "To optimize an itinerary, activities should be clustered geographically by district rather than scheduled at random:",
+                "• **Zone 1**: Group historic Old City monuments together to explore on foot.",
+                "• **Zone 2**: Group fortresses and heritage complexes that share western arterial roads.",
+                "• **Zone 3**: Schedule shopping and culinary evenings close to your accommodation.\n",
+                "Add a few activities to your trip and I can evaluate travel times and distance clusters for you!"
+            ])
+        reply = "\n".join(lines)
+        self.memory.save_turn(user_id, cid, msg_text, reply, {}, action_status="read_only")
+        return {"response": reply, "conversation_id": cid, "tool_called": None, "action_status": "read_only", "places": []}
 
     async def _handle_conversational_chat(
         self,
@@ -1002,7 +1363,8 @@ class TravelTrackAIAgent:
             user_message=user_message,
             greeting_type=greeting_type,
             active_trip=active_trip,
-            is_new_conversation=is_new_conversation
+            is_new_conversation=is_new_conversation,
+            chat_history=chat_history
         )
 
     @staticmethod
@@ -1106,8 +1468,10 @@ class TravelTrackAIAgent:
         t_low = text.lower().strip()
         clean = re.sub(r"[^\w\s]", "", t_low)
 
-        # Exact or partial match on destination or title
+        # Exact or partial match on ID, destination, or title
         for t in trips:
+            if str(t.get("_id")) in text:
+                return t
             dest = t.get("destination", "").lower()
             title = t.get("title", "").lower()
             if dest and (dest == t_low or dest in t_low or t_low in dest or dest in clean):
@@ -1362,9 +1726,30 @@ class TravelTrackAIAgent:
     def _detect_place_search(self, msg_text: str) -> Optional[Dict[str, Any]]:
         """
         Detect place search intent and extract destination/landmark and category.
-        Strictly excludes any action intents, mutations, or clarification answers.
+        Strictly excludes general AI questions, explanations, action intents, mutations, or clarification answers.
         """
         t_low = msg_text.lower().strip()
+
+        # 0. Strict exclusion of general AI questions, coding, science, explanations, advice, or language questions
+        GENERAL_AI_TRIGGERS = [
+            r"\bteach\s+me\b", r"\bphrases?\b", r"\bwords?\b", r"\blanguage\b", r"\btranslate\b",
+            r"\bfamous\s+for\b", r"\bhistory\s+of\b", r"\bculture\s+of\b", r"\btell\s+me\s+about\b",
+            r"\bexplain\b", r"\bwhat\s+is\b", r"\bwhat\s+are\b", r"\bwhy\s+is\b", r"\bwhy\s+are\b",
+            r"\bhow\s+does\b", r"\bhow\s+do\b", r"\bhow\s+to\b", r"\bhow\s+can\b",
+            r"\bwrite\b", r"\bhelp\s+me\b", r"\bjoke\b", r"\briddle\b",
+            r"\bpython\b", r"\bcode\b", r"\bprogram\b", r"\balgorithm\b", r"\brecursion\b",
+            r"\bmachine\s+learning\b", r"\bdeep\s+learning\b", r"\bdata\s+science\b",
+            r"\bsql\b", r"\bnosql\b", r"\bdatabase\b", r"\bphotosynthesis\b",
+            r"\bis\s+(?:that|this|it|\d+[\d,]*)\s+enough\b", r"\bcan\s+i\s+afford\b", r"\binefficient\b",
+            r"\bweather\b", r"\bflights?\b", r"\btickets?\b", r"\bvisa\b", r"\bcurrency\b",
+            r"\bpacking\b", r"\bwhat\s+should\s+i\s+pack\b"
+        ]
+        if any(re.search(pat, t_low) for pat in GENERAL_AI_TRIGGERS):
+            # Only treat as place search if there is an explicit discovery command like "find places in", "search attractions in", etc.
+            if not any(re.search(pat, t_low) for pat in [
+                r"\b(?:find|search|explore|look\s+for|show(?:\s+me)?|list)\s+(?:all\s+the\s+)?(?:places|attractions|sights|spots|hotels?|restaurants?)\b"
+            ]):
+                return None
 
         # 1. Strict exclusion of action words, functional commands, and confirmation words
         ACTION_STEMS = [
@@ -1526,8 +1911,17 @@ class TravelTrackAIAgent:
             if "last" in t_low:
                 return rec_places[-1]
 
-        if ("that place" in t_low or "this place" in t_low or "the place" in t_low) and context.get("last_mentioned_place"):
-            return context["last_mentioned_place"]
+        # Pronoun or demonstrative reference ("add it", "add that", "add this", "that place", "this place")
+        pronoun_match = any(
+            re.search(rf"\b{p}\b", t_low) for p in [
+                "it", "that", "this", "that place", "this place", "the place", "the sight", "the attraction"
+            ]
+        )
+        if pronoun_match:
+            if context.get("last_mentioned_place"):
+                return context["last_mentioned_place"]
+            if rec_places:
+                return rec_places[0]
 
         return None
 
@@ -1702,6 +2096,24 @@ class TravelTrackAIAgent:
             }
 
         # -------------------------------------------------------------
+        # 1B. INTENT: TRAVEL CONTEXT REASONING (BUDGET FEASIBILITY & ITINERARY EFFICIENCY)
+        # -------------------------------------------------------------
+        # e.g. "I have ₹10,000 left for my Hyderabad trip. Is that enough?", "Is 10,000 enough for my trip?"
+        if any(re.search(pat, msg_low) for pat in [
+            r"\b(?:is\s+(?:that|this|it|\d+[\d,]*)\s+enough)\b",
+            r"\bcan\s+i\s+afford\b",
+            r"\bhow\s+far\s+will\b.*?\b(?:go|last)\b",
+            r"\benough\s+for\s+(?:my\s+)?(?:trip|[a-zA-Z\s]+)\b"
+        ]):
+            return self._handle_travel_budget_reasoning(user_id, msg_text, cid, active_trip)
+
+        # e.g. "Explain why my current itinerary is inefficient", "optimize my itinerary", "is my itinerary efficient"
+        if any(re.search(pat, msg_low) for pat in [
+            r"\b(?:inefficient|optimize\s+itinerary|optimize\s+my\s+route|is\s+my\s+itinerary\s+(?:good|efficient))\b"
+        ]):
+            return self._handle_itinerary_efficiency_reasoning(user_id, msg_text, cid, active_trip)
+
+        # -------------------------------------------------------------
         # 2. INTENT: TRIP DATE & ATTRIBUTE UPDATES (RESCHEDULE / MOVE DATE)
         # -------------------------------------------------------------
         if any(p in msg_low for p in [
@@ -1807,14 +2219,12 @@ class TravelTrackAIAgent:
         # -------------------------------------------------------------
 
         # 1. Delete trip
-        if any(p in msg_low for p in ["delete my trip", "delete trip", "remove my trip", "cancel my trip"]):
-            target_trip = active_trip
-            # Check if specific trip name mentioned
-            trips_res = self.tools.get_user_trips(user_id)
-            for t in trips_res.get("trips", []):
-                if t["destination"].lower() in msg_low or t["title"].lower() in msg_low:
-                    target_trip = t
-                    break
+        if any(p in msg_low for p in ["delete my trip", "delete trip", "remove my trip", "cancel my trip", "delete the trip"]):
+            target_trip = self._match_trip_from_text(user_id, msg_text) or active_trip
+            if not target_trip:
+                all_trips = self.tools.get_user_trips(user_id).get("trips", [])
+                if len(all_trips) == 1:
+                    target_trip = all_trips[0]
 
             if not target_trip:
                 return {

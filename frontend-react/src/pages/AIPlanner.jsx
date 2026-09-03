@@ -47,6 +47,57 @@ const STYLE_OPTIONS = [
   'Family Friendly'
 ];
 
+const TOOL_LABELS = {
+  add_itinerary_activity: 'Added to Itinerary',
+  update_itinerary_activity: 'Updated Itinerary',
+  delete_itinerary_activity: 'Removed from Itinerary',
+  add_expense: 'Logged Expense',
+  update_expense: 'Updated Expense',
+  delete_expense: 'Removed Expense',
+  get_budget: 'Checked Budget',
+  get_itinerary: 'Checked Itinerary',
+  get_expenses: 'Checked Expenses',
+  get_user_trips: 'Loaded Trips',
+  get_wishlist: 'Checked Wishlist',
+  add_wishlist: 'Saved to Wishlist',
+  remove_wishlist: 'Removed from Wishlist',
+  update_trip: 'Updated Trip',
+  create_trip: 'Created Trip',
+  delete_trip: 'Deleted Trip',
+  search_places: 'Explored Sights',
+  find_nearby_places: 'Found Nearby Places',
+  get_place_details: 'Retrieved Place Details',
+};
+
+function renderFormattedContent(text) {
+  if (!text) return null;
+  const parts = text.split(/(```[\s\S]*?```)/g);
+  return parts.map((part, pIdx) => {
+    if (part.startsWith('```') && part.endsWith('```')) {
+      const firstLineEnd = part.indexOf('\n');
+      const lang = firstLineEnd !== -1 ? part.slice(3, firstLineEnd).trim() : '';
+      const code = firstLineEnd !== -1 ? part.slice(firstLineEnd + 1, -3) : part.slice(3, -3);
+      return (
+        <div key={pIdx} style={{ margin: '0.6rem 0', borderRadius: '8px', overflow: 'hidden', border: '1px solid rgba(0,0,0,0.15)' }}>
+          {lang && (
+            <div style={{ backgroundColor: '#0f172a', color: '#94a3b8', fontSize: '0.7rem', padding: '0.25rem 0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>
+              {lang}
+            </div>
+          )}
+          <pre style={{ margin: 0, padding: '0.75rem', backgroundColor: '#1e293b', color: '#f8fafc', fontSize: '0.78rem', overflowX: 'auto', fontFamily: 'Consolas, Monaco, "Courier New", monospace', lineHeight: 1.45 }}>
+            <code>{code}</code>
+          </pre>
+        </div>
+      );
+    }
+    return (
+      <span key={pIdx} style={{ whiteSpace: 'pre-wrap' }}>
+        {part}
+      </span>
+    );
+  });
+}
+
 let plannerMsgCounter = 0;
 const getPlannerMsgId = (prefix) => `${prefix}_${++plannerMsgCounter}`;
 
@@ -639,11 +690,11 @@ export const AIPlanner = () => {
                         }}
                       >
                         <CheckCircle2 size={12} />
-                        <span>Action: {m.tool_called}</span>
+                        <span>{TOOL_LABELS[m.tool_called] || m.tool_called.replace(/_/g, ' ')}</span>
                       </div>
                     )}
 
-                    {m.content}
+                    {renderFormattedContent(m.content)}
 
                     {/* Places recommendation cards */}
                     {m.places && m.places.length > 0 && (
@@ -740,7 +791,7 @@ export const AIPlanner = () => {
                 }}
               >
                 <RefreshCw size={14} className="spinner" />
-                <span>AI is reading context and executing tool...</span>
+                <span>TravelTrack AI is thinking...</span>
               </div>
             )}
 

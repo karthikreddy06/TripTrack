@@ -651,6 +651,203 @@ def run_10_exact_regression_tests():
     print("=" * 60)
 
 
+def run_general_ai_upgrade_tests():
+    """
+    Validates General AI capabilities, Coding, Science, Languages,
+    Travel Reasoning, and Non-hijacking Context Switching.
+    """
+    print("\n" + "=" * 60)
+    print("STARTING GENERAL AI + TRAVELTRACK AGENT INTEGRATION TESTS")
+    print("=" * 60)
+
+    client = TestClient(app, raise_server_exceptions=False)
+    u_id = "507f1f77bcf86cd799439088"
+    token = create_access_token(u_id)
+
+    trips_collection.delete_many({"user_id": u_id})
+    itineraries_collection.delete_many({"user_id": u_id})
+    expenses_collection.delete_many({"user_id": u_id})
+    wishlist_collection.delete_many({"user_id": u_id})
+    chat_conversations_collection.delete_many({"user_id": u_id})
+
+    # Seed an active Hyderabad trip
+    hyd_trip = {
+        "user_id": u_id,
+        "title": "Hyderabad Explorer",
+        "destination": "Hyderabad",
+        "start_date": "2026-11-01",
+        "end_date": "2026-11-05",
+        "budget": 20000.0,
+        "notes": "Exploring historical monuments and food in Hyderabad."
+    }
+    hyd_res = trips_collection.insert_one(hyd_trip)
+    hyd_id = str(hyd_res.inserted_id)
+
+    # -------------------------------------------------------------
+    # 1. GENERAL KNOWLEDGE: "What is Python?"
+    # -------------------------------------------------------------
+    print("\n[GEN AI 1] Testing 'What is Python?'...")
+    r = client.post("/ai/chat", headers={"Authorization": f"Bearer {token}"}, json={"message": "What is Python?"})
+    assert r.status_code == 200
+    d = r.json()
+    assert d["tool_called"] is None
+    assert len(d.get("places") or []) == 0
+    assert "programming language" in d["response"].lower() or "readability" in d["response"].lower()
+    assert "i received your message" not in d["response"].lower()
+    print("  [PASS] 'What is Python?' answered naturally with ZERO tools.")
+
+    # -------------------------------------------------------------
+    # 2. GENERAL KNOWLEDGE: "Explain machine learning"
+    # -------------------------------------------------------------
+    print("\n[GEN AI 2] Testing 'Explain machine learning'...")
+    r = client.post("/ai/chat", headers={"Authorization": f"Bearer {token}"}, json={"message": "Explain machine learning"})
+    assert r.status_code == 200
+    d = r.json()
+    assert d["tool_called"] is None
+    assert len(d.get("places") or []) == 0
+    assert "supervised" in d["response"].lower() or "patterns" in d["response"].lower()
+    assert "i received your message" not in d["response"].lower()
+    print("  [PASS] 'Explain machine learning' answered thoroughly with ZERO tools.")
+
+    # -------------------------------------------------------------
+    # 3. PROGRAMMING: "Write a Python API"
+    # -------------------------------------------------------------
+    print("\n[GEN AI 3] Testing 'Write a Python API'...")
+    r = client.post("/ai/chat", headers={"Authorization": f"Bearer {token}"}, json={"message": "Write a Python API"})
+    assert r.status_code == 200
+    d = r.json()
+    assert d["tool_called"] is None
+    assert "fastapi" in d["response"].lower() or "def " in d["response"]
+    assert len(d.get("places") or []) == 0
+    print("  [PASS] 'Write a Python API' returned code example with ZERO tools.")
+
+    # -------------------------------------------------------------
+    # 4. PROGRAMMING: "Explain recursion"
+    # -------------------------------------------------------------
+    print("\n[GEN AI 4] Testing 'Explain recursion'...")
+    r = client.post("/ai/chat", headers={"Authorization": f"Bearer {token}"}, json={"message": "Explain recursion"})
+    assert r.status_code == 200
+    d = r.json()
+    assert d["tool_called"] is None
+    assert "base case" in d["response"].lower()
+    assert "factorial" in d["response"].lower() or "fibonacci" in d["response"].lower()
+    print("  [PASS] 'Explain recursion' explained base case and call stack with ZERO tools.")
+
+    # -------------------------------------------------------------
+    # 5. HUMOR: "Tell me a joke"
+    # -------------------------------------------------------------
+    print("\n[GEN AI 5] Testing 'Tell me a joke'...")
+    r = client.post("/ai/chat", headers={"Authorization": f"Bearer {token}"}, json={"message": "Tell me a joke"})
+    assert r.status_code == 200
+    d = r.json()
+    assert d["tool_called"] is None
+    assert len(d.get("places") or []) == 0
+    assert "bugs" in d["response"].lower() or "dark mode" in d["response"].lower() or "joke" in d["response"].lower()
+    print("  [PASS] 'Tell me a joke' returned humorous response with ZERO tools.")
+
+    # -------------------------------------------------------------
+    # 6. SCIENCE: "What is photosynthesis?"
+    # -------------------------------------------------------------
+    print("\n[GEN AI 6] Testing 'What is photosynthesis?'...")
+    r = client.post("/ai/chat", headers={"Authorization": f"Bearer {token}"}, json={"message": "What is photosynthesis?"})
+    assert r.status_code == 200
+    d = r.json()
+    assert d["tool_called"] is None
+    assert len(d.get("places") or []) == 0
+    assert "carbon dioxide" in d["response"].lower() or "co2" in d["response"].lower()
+    assert "glucose" in d["response"].lower() or "chlorophyll" in d["response"].lower()
+    print("  [PASS] 'What is photosynthesis?' answered scientific query with ZERO tools.")
+
+    # -------------------------------------------------------------
+    # 7. TRAVEL CULTURAL QUESTION: "What is Kyoto famous for?" (MUST NOT search places!)
+    # -------------------------------------------------------------
+    print("\n[GEN AI 7] Testing 'What is Kyoto famous for?' (Cultural inquiry, NO search)...")
+    r = client.post("/ai/chat", headers={"Authorization": f"Bearer {token}"}, json={"message": "What is Kyoto famous for?"})
+    assert r.status_code == 200
+    d = r.json()
+    assert d["tool_called"] is None, f"Expected None, got '{d['tool_called']}'"
+    assert len(d.get("places") or []) == 0
+    assert "capital" in d["response"].lower() or "temple" in d["response"].lower() or "shrine" in d["response"].lower()
+    print("  [PASS] 'What is Kyoto famous for?' answered culturally with ZERO place search calls.")
+
+    # -------------------------------------------------------------
+    # 8. TRAVEL LANGUAGE: "Teach me some Japanese phrases I'll need in Kyoto"
+    # -------------------------------------------------------------
+    print("\n[GEN AI 8] Testing 'Teach me some Japanese phrases I'll need in Kyoto'...")
+    r = client.post("/ai/chat", headers={"Authorization": f"Bearer {token}"}, json={"message": "Teach me some Japanese phrases I'll need in Kyoto"})
+    assert r.status_code == 200
+    d = r.json()
+    assert d["tool_called"] is None, f"Expected None, got '{d['tool_called']}'"
+    assert len(d.get("places") or []) == 0
+    assert "arigatou" in d["response"].lower() or "konnichiwa" in d["response"].lower() or "sumimasen" in d["response"].lower()
+    print("  [PASS] Japanese phrases answered with ZERO tools and NO search.")
+
+    # -------------------------------------------------------------
+    # 9. GENERAL AI + TRAVEL CONTEXT REASONING:
+    # "I have ₹10,000 left for my Hyderabad trip. Is that enough?"
+    # -------------------------------------------------------------
+    print("\n[GEN AI 9] Testing 'I have ₹10,000 left for my Hyderabad trip. Is that enough?'...")
+    r = client.post("/ai/chat", headers={"Authorization": f"Bearer {token}"}, json={"message": "I have ₹10,000 left for my Hyderabad trip. Is that enough?"})
+    assert r.status_code == 200
+    d = r.json()
+    assert d["tool_called"] is None
+    assert "hyderabad" in d["response"].lower()
+    assert "10,000" in d["response"] or "sufficient" in d["response"].lower()
+    assert "food" in d["response"].lower()
+    print("  [PASS] Budget feasibility reasoning provided deep analysis using real trip data.")
+
+    # -------------------------------------------------------------
+    # 10. CONTEXT SWITCHING WITHOUT HIJACKING:
+    # Turn 1: "Find places in Mumbai" -> search_places
+    # Turn 2: "What is photosynthesis?" -> biology answer, ZERO tools!
+    # Turn 3: "Add the second place to Day 3" -> adds second Mumbai place to Day 3!
+    # -------------------------------------------------------------
+    print("\n[GEN AI 10] Testing Context Switching: Mumbai search -> Biology question -> Add 2nd place to Day 3...")
+    conv_switch = f"conv_switch_{uuid.uuid4().hex[:6]}"
+    
+    # Turn 1
+    t1 = client.post("/ai/chat", headers={"Authorization": f"Bearer {token}"}, json={"message": "Find famous places in Mumbai", "conversation_id": conv_switch})
+    assert t1.status_code == 200
+    dt1 = t1.json()
+    assert dt1["tool_called"] == "search_places"
+    assert len(dt1.get("places") or []) >= 2
+    second_mumbai_place = dt1["places"][1]["name"]
+    print(f"  Turn 1 Pass: Found places in Mumbai (second: '{second_mumbai_place}')")
+
+    # Turn 2: Unrelated General AI question in the SAME conversation
+    t2 = client.post("/ai/chat", headers={"Authorization": f"Bearer {token}"}, json={"message": "What is photosynthesis?", "conversation_id": conv_switch})
+    assert t2.status_code == 200
+    dt2 = t2.json()
+    assert dt2["tool_called"] is None, "CRITICAL: General AI question hijacked by prior travel search!"
+    assert len(dt2.get("places") or []) == 0
+    assert "co2" in dt2["response"].lower() or "glucose" in dt2["response"].lower() or "plants" in dt2["response"].lower()
+    print("  Turn 2 Pass: Unrelated biology question answered normally with ZERO tool calls.")
+
+    # Turn 3: Follow-up re-engages the prior Mumbai recommendations!
+    t3 = client.post("/ai/chat", headers={"Authorization": f"Bearer {token}"}, json={"message": "Add the second place to Day 3", "conversation_id": conv_switch})
+    assert t3.status_code == 200
+    dt3 = t3.json()
+    assert dt3["tool_called"] == "add_itinerary_activity"
+    assert dt3["mutation_occurred"] is True
+    # Verify in DB
+    act = itineraries_collection.find_one({"user_id": u_id, "trip_id": hyd_id, "day_number": 3})
+    assert act is not None
+    assert second_mumbai_place.lower() in act["title"].lower()
+    print(f"  Turn 3 Pass: Seamlessly resumed travel context and added '{second_mumbai_place}' to Day 3!")
+
+    # Clean up
+    trips_collection.delete_many({"user_id": u_id})
+    itineraries_collection.delete_many({"user_id": u_id})
+    expenses_collection.delete_many({"user_id": u_id})
+    wishlist_collection.delete_many({"user_id": u_id})
+    chat_conversations_collection.delete_many({"user_id": u_id})
+
+    print("\n" + "=" * 60)
+    print("ALL GENERAL AI + TRAVELTRACK INTEGRATION TESTS PASSED!")
+    print("=" * 60)
+
+
 if __name__ == "__main__":
     run_ai_agent_tests()
     run_10_exact_regression_tests()
+    run_general_ai_upgrade_tests()

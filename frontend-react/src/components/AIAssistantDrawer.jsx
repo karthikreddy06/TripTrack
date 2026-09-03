@@ -18,6 +18,57 @@ import { SafeImage } from './SafeImage';
 let msgCounter = 0;
 const getNextMsgId = (prefix) => `${prefix}_${++msgCounter}`;
 
+const TOOL_LABELS = {
+  add_itinerary_activity: 'Added to Itinerary',
+  update_itinerary_activity: 'Updated Itinerary',
+  delete_itinerary_activity: 'Removed from Itinerary',
+  add_expense: 'Logged Expense',
+  update_expense: 'Updated Expense',
+  delete_expense: 'Removed Expense',
+  get_budget: 'Checked Budget',
+  get_itinerary: 'Checked Itinerary',
+  get_expenses: 'Checked Expenses',
+  get_user_trips: 'Loaded Trips',
+  get_wishlist: 'Checked Wishlist',
+  add_wishlist: 'Saved to Wishlist',
+  remove_wishlist: 'Removed from Wishlist',
+  update_trip: 'Updated Trip',
+  create_trip: 'Created Trip',
+  delete_trip: 'Deleted Trip',
+  search_places: 'Explored Sights',
+  find_nearby_places: 'Found Nearby Places',
+  get_place_details: 'Retrieved Place Details',
+};
+
+function renderFormattedContent(text) {
+  if (!text) return null;
+  const parts = text.split(/(```[\s\S]*?```)/g);
+  return parts.map((part, pIdx) => {
+    if (part.startsWith('```') && part.endsWith('```')) {
+      const firstLineEnd = part.indexOf('\n');
+      const lang = firstLineEnd !== -1 ? part.slice(3, firstLineEnd).trim() : '';
+      const code = firstLineEnd !== -1 ? part.slice(firstLineEnd + 1, -3) : part.slice(3, -3);
+      return (
+        <div key={pIdx} style={{ margin: '0.6rem 0', borderRadius: '8px', overflow: 'hidden', border: '1px solid rgba(0,0,0,0.15)' }}>
+          {lang && (
+            <div style={{ backgroundColor: '#0f172a', color: '#94a3b8', fontSize: '0.7rem', padding: '0.25rem 0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>
+              {lang}
+            </div>
+          )}
+          <pre style={{ margin: 0, padding: '0.75rem', backgroundColor: '#1e293b', color: '#f8fafc', fontSize: '0.78rem', overflowX: 'auto', fontFamily: 'Consolas, Monaco, "Courier New", monospace', lineHeight: 1.45 }}>
+            <code>{code}</code>
+          </pre>
+        </div>
+      );
+    }
+    return (
+      <span key={pIdx} style={{ whiteSpace: 'pre-wrap' }}>
+        {part}
+      </span>
+    );
+  });
+}
+
 export const AIAssistantDrawer = () => {
   const { isAuthenticated } = useAuth();
   const { showError, showSuccess } = useToast();
@@ -471,20 +522,21 @@ export const AIAssistantDrawer = () => {
                         alignItems: 'center',
                         gap: '0.35rem',
                         fontSize: '0.72rem',
-                        padding: '0.15rem 0.45rem',
-                        borderRadius: '4px',
-                        backgroundColor: 'rgba(95, 155, 104, 0.15)',
+                        padding: '0.18rem 0.55rem',
+                        borderRadius: '6px',
+                        backgroundColor: 'rgba(95, 155, 104, 0.12)',
                         color: 'var(--primary-green)',
                         fontWeight: 600,
-                        marginBottom: '0.5rem',
+                        marginBottom: '0.6rem',
+                        letterSpacing: '0.02em',
                       }}
                     >
-                      <CheckCircle2 size={11} />
-                      <span>{m.tool_called}</span>
+                      <CheckCircle2 size={12} />
+                      <span>{TOOL_LABELS[m.tool_called] || m.tool_called.replace(/_/g, ' ')}</span>
                     </div>
                   )}
 
-                  {m.content}
+                  {renderFormattedContent(m.content)}
 
                   {/* Place cards if returned */}
                   {m.places && m.places.length > 0 && (
@@ -582,7 +634,7 @@ export const AIAssistantDrawer = () => {
               }}
             >
               <RefreshCw size={13} className="spinner" />
-              <span>AI is consulting TravelTrack data...</span>
+              <span>TravelTrack AI is thinking...</span>
             </div>
           )}
 
