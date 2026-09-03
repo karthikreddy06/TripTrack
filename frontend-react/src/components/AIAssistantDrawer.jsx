@@ -45,8 +45,11 @@ export const AIAssistantDrawer = () => {
         const res = await tripsAPI.getTrips();
         const userTrips = res.trips || [];
         setTrips(userTrips);
-        if (userTrips.length > 0) {
-          setActiveTripId((prev) => prev || userTrips[0]._id || userTrips[0].trip_id);
+
+        // Auto-select ONLY if user is currently on a specific trip detail page
+        const match = window.location.pathname.match(/\/trips\/([a-f0-9]{24})/i);
+        if (match && match[1]) {
+          setActiveTripId(match[1]);
         }
       } catch {
         // Non-fatal
@@ -157,11 +160,15 @@ export const AIAssistantDrawer = () => {
     }
   };
 
+  const activeTrip = trips.find((t) => (t._id || t.trip_id) === activeTripId);
   const QUICK_PROMPTS = [
     { label: '💰 Check my budget', text: 'How much budget do I have left?' },
-    { label: '📍 Find places in Hyderabad', text: 'Find top attractions in Hyderabad' },
-    { label: '📅 What am I doing Day 1?', text: 'What am I doing on Day 1?' },
-    { label: '🧾 Add ₹500 for dinner', text: 'Add an expense of ₹500 for dinner' },
+    {
+      label: activeTrip ? `📍 Sights in ${activeTrip.destination}` : '📍 Find places to visit',
+      text: activeTrip ? `Find top attractions in ${activeTrip.destination}` : 'Find places',
+    },
+    { label: '📅 What am I doing tomorrow?', text: 'What am I doing tomorrow?' },
+    { label: '✨ Check my wishlist', text: 'Check my wishlist' },
   ];
 
   return (

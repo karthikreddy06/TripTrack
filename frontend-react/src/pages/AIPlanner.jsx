@@ -480,14 +480,19 @@ export const AIPlanner = () => {
             <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
               Quick Suggestions:
             </span>
-            {[
-              { label: '💰 Check my budget', text: 'How much budget do I have left?' },
-              { label: '📍 Find places in Hyderabad', text: 'Find top attractions in Hyderabad' },
-              { label: '📅 What am I doing on Day 1?', text: 'What am I doing on Day 1?' },
-              { label: '🧾 Add ₹1,200 for dinner', text: 'Add an expense of ₹1,200 for dinner' },
-              { label: '✨ Check my wishlist', text: 'Check my wishlist' },
-              { label: '🧳 Read my trips', text: 'Read my trips' }
-            ].map((chip, idx) => (
+            {(() => {
+              const selTrip = userTrips.find((t) => (t._id || t.trip_id) === selectedTripId);
+              return [
+                { label: '💰 Check my budget', text: 'How much budget do I have left?' },
+                {
+                  label: selTrip ? `📍 Sights in ${selTrip.destination}` : '📍 Find places to visit',
+                  text: selTrip ? `Find top attractions in ${selTrip.destination}` : 'Find places',
+                },
+                { label: '📅 What am I doing tomorrow?', text: 'What am I doing tomorrow?' },
+                { label: '✨ Check my wishlist', text: 'Check my wishlist' },
+                { label: '🧳 Read my trips', text: 'Read my trips' }
+              ];
+            })().map((chip, idx) => (
               <button
                 key={idx}
                 type="button"

@@ -4,6 +4,7 @@ import json
 import time
 import logging
 import uuid
+import httpx
 from datetime import datetime, timezone, date, timedelta
 from typing import Dict, List, Optional, Any, Tuple
 from bson import ObjectId
@@ -44,6 +45,95 @@ def sanitize_untrusted_text(text: Optional[str]) -> str:
     for pat in INJECTION_PATTERNS:
         clean = pat.sub("[filtered]", clean)
     return clean[:1000]
+
+
+TRAVEL_AGENT_SYSTEM_PROMPT = (
+    "You are TravelTrack's AI Travel Agent, an authentic, helpful, and precise personal travel assistant. "
+    "You assist travelers with exploring destinations, discovering verified sights, planning day-by-day itineraries, "
+    "budgeting, and managing expenses. "
+    "Key Guidelines:\n"
+    "1. For greetings and casual conversation (e.g., 'heyy', 'hello', 'thanks', 'cool'), respond warmly and conversationally without calling any tools or searching places.\n"
+    "2. NEVER assume or invent a default destination (e.g., New Delhi, Hyderabad, Kolkata) unless the user explicitly requested it.\n"
+    "3. If the user asks to find or explore places without mentioning a destination, ask them which city or destination they would like to explore.\n"
+    "4. Keep answers friendly, concise, and helpful."
+)
+
+
+class LLMClient:
+    """Unified LLM client supporting Google Gemini and OpenAI with dynamic fallback."""
+
+    def __init__(self):
+        self.gemini_key = os.environ.get("GEMINI_API_KEY", "").strip()
+        self.openai_key = os.environ.get("OPENAI_API_KEY", "").strip()
+
+    async def generate_response(
+        self,
+        system_prompt: str,
+        user_message: str,
+        chat_history: Optional[List[Dict[str, Any]]] = None
+    ) -> Optional[str]:
+        # 1. Try Google Gemini
+        if self.gemini_key:
+            try:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={self.gemini_key}"
+                contents = []
+                if chat_history:
+                    for h in chat_history[-6:]:
+                        role = "user" if h.get("role") == "user" else "model"
+                        contents.append({"role": role, "parts": [{"text": h.get("content", "")}]})
+                contents.append({"role": "user", "parts": [{"text": user_message}]})
+
+                payload = {
+                    "systemInstruction": {"parts": [{"text": system_prompt}]},
+                    "contents": contents,
+                    "generationConfig": {"temperature": 0.7, "maxOutputTokens": 400}
+                }
+                async with httpx.AsyncClient(timeout=8.0) as client:
+                    resp = await client.post(url, json=payload)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        candidates = data.get("candidates", [])
+                        if candidates:
+                            text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text")
+                            if text:
+                                return text.strip()
+            except Exception as exc:
+                logger.warning(f"Gemini API call failed: {exc}")
+
+        # 2. Try OpenAI
+        if self.openai_key:
+            try:
+                url = "https://api.openai.com/v1/chat/completions"
+                messages = [{"role": "system", "content": system_prompt}]
+                if chat_history:
+                    for h in chat_history[-6:]:
+                        role = "assistant" if h.get("role") == "assistant" else "user"
+                        messages.append({"role": role, "content": h.get("content", "")})
+                messages.append({"role": "user", "content": user_message})
+
+                payload = {
+                    "model": "gpt-4o-mini",
+                    "messages": messages,
+                    "temperature": 0.7,
+                    "max_tokens": 400
+                }
+                async with httpx.AsyncClient(timeout=8.0) as client:
+                    resp = await client.post(
+                        url,
+                        headers={"Authorization": f"Bearer {self.openai_key}"},
+                        json=payload
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        choices = data.get("choices", [])
+                        if choices:
+                            text = choices[0].get("message", {}).get("content")
+                            if text:
+                                return text.strip()
+            except Exception as exc:
+                logger.warning(f"OpenAI API call failed: {exc}")
+
+        return None
 
 
 # =====================================================================
@@ -719,9 +809,10 @@ class TravelTrackAIAgent:
     def __init__(self):
         self.tools = AIAgentTools()
         self.memory = ConversationMemoryManager()
+        self.llm_client = LLMClient()
 
     def _resolve_active_trip(self, user_id: str, explicit_trip_id: Optional[str], context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Identify which trip the user is referring to."""
+        """Identify which trip the user is referring to (strictly explicit, no silent guessing)."""
         # 1. Explicit trip ID passed in request
         if explicit_trip_id and ObjectId.is_valid(explicit_trip_id):
             trip = trips_collection.find_one({"_id": ObjectId(explicit_trip_id), "user_id": user_id})
@@ -737,12 +828,238 @@ class TravelTrackAIAgent:
                 trip["_id"] = str(trip["_id"])
                 return trip
 
-        # 3. Fallback: most recent ongoing or planned trip
-        trip = trips_collection.find_one({"user_id": user_id}, sort=[("start_date", -1)])
-        if trip:
-            trip["_id"] = str(trip["_id"])
-            return trip
         return None
+
+    def _is_greeting_or_casual(self, text: str) -> Tuple[bool, Optional[str]]:
+        """
+        Determine if text is a greeting, acknowledgment, or casual chat.
+        Returns (True, type) if casual/greeting and contains NO actionable travel commands.
+        """
+        clean = re.sub(r"[^\w\s']", "", text.strip()).lower()
+        words = clean.split()
+        if not words:
+            return True, "greeting"
+
+        # Actionable stems that indicate a tool action or data inquiry
+        ACTIONABLE_STEMS = [
+            "find", "search", "explore", "show", "read", "list", "get", "check",
+            "add", "delete", "remove", "update", "change", "move", "create", "plan",
+            "budget", "expense", "expenses", "itinerary", "wishlist", "trip", "trips",
+            "hotel", "hotels", "restaurant", "restaurants", "cafe", "cafes",
+            "attraction", "attractions", "sights", "places", "visit", "schedule"
+        ]
+
+        has_actionable = any(
+            w in ACTIONABLE_STEMS or any(s in w for s in ["budget", "expense", "itinerary", "wishlist"])
+            for w in words
+        )
+
+        # 1. Thanks / Gratitude
+        if any(clean == w or clean.startswith(w + " ") for w in ["thanks", "thank you", "thx", "ty", "cheers", "much appreciated"]):
+            if not has_actionable:
+                return True, "thanks"
+
+        # 2. Affirmations / Acknowledgments
+        if any(clean == w for w in ["ok", "okay", "cool", "awesome", "great", "sounds good", "perfect", "got it", "understood", "nice", "alright", "sure", "yep", "fine"]):
+            if not has_actionable:
+                return True, "acknowledgment"
+
+        # 3. Farewells
+        if any(clean == w or clean.startswith(w + " ") for w in ["bye", "goodbye", "see you", "see ya", "talk to you later", "good night"]):
+            if not has_actionable:
+                return True, "farewell"
+
+        # 4. Identity / Capabilities
+        if any(clean == w for w in ["who are you", "what can you do", "what are you", "help", "help me"]):
+            if not has_actionable:
+                return True, "identity"
+
+        # 5. Greetings
+        GREETING_STARTS = [
+            "hi", "hey", "heyy", "heyyy", "hello", "howdy", "hola", "namaste", "bonjour", "greetings",
+            "good morning", "good afternoon", "good evening", "good day",
+            "whats up", "what's up", "wassup", "sup", "how are you", "how are you doing", "hows it going", "how's it going"
+        ]
+
+        is_greeting_word = any(
+            clean == g or clean.startswith(g + " ") or re.match(r"^he+y+$", clean) or re.match(r"^hi+$", clean) or re.match(r"^hello+$", clean)
+            for g in GREETING_STARTS
+        )
+
+        if is_greeting_word and not has_actionable:
+            return True, "greeting"
+
+        return False, None
+
+    def _generate_natural_chat_response(
+        self,
+        user_message: str,
+        greeting_type: str,
+        active_trip: Optional[Dict[str, Any]] = None
+    ) -> str:
+        """
+        Dynamically crafts an authentic, friendly travel-assistant response for greetings and casual chat.
+        Never uses static one-line canned strings; dynamically factors in time of day, active trip context,
+        and tone.
+        """
+        t_low = user_message.lower()
+
+        if greeting_type == "thanks":
+            if active_trip:
+                return f"You're very welcome! Let me know if you need anything else for your trip to **{active_trip.get('destination')}**, like checking budget or scheduling activities."
+            return "You're very welcome! Feel free to ask whenever you'd like to check a budget, plan an itinerary, or explore places worldwide."
+
+        if greeting_type == "acknowledgment":
+            if active_trip:
+                return f"Sounds good! Whenever you're ready, we can add activities, log expenses, or review your schedule for **{active_trip.get('destination')}**."
+            return "Sounds like a plan! Let me know what you'd like to work on—whether that's exploring destinations, organizing trips, or tracking finances."
+
+        if greeting_type == "farewell":
+            return "Safe travels and happy wandering! Reach out whenever you're ready to plan your next journey."
+
+        if greeting_type == "identity":
+            return (
+                "I am your **TravelTrack AI Agent**. I help you plan trips, organize day-by-day itineraries, track budgets and expenses, "
+                "and explore authentic sights and restaurants worldwide using live OpenStreetMap data.\n\n"
+                "Here are things you can ask me:\n"
+                "• *'Find top attractions in Kolkata'*\n"
+                "• *'Find restaurants near Eiffel Tower'*\n"
+                "• *'What is my budget?'*\n"
+                "• *'What am I doing tomorrow?'*\n"
+                "• *'Add Charminar to Day 2'*\n"
+                "• *'Check my wishlist'*"
+            )
+
+        # General Greetings
+        hour = datetime.now().hour
+        tod = "Good morning" if 5 <= hour < 12 else ("Good afternoon" if 12 <= hour < 18 else "Good evening")
+
+        if "good morning" in t_low:
+            salutation = "Good morning!"
+        elif "good evening" in t_low:
+            salutation = "Good evening!"
+        elif "good afternoon" in t_low:
+            salutation = "Good afternoon!"
+        elif "hey" in t_low:
+            salutation = "Hey there! 👋"
+        elif "hello" in t_low:
+            salutation = "Hello! 👋"
+        else:
+            salutation = f"{tod}! 👋"
+
+        if active_trip:
+            return (
+                f"{salutation} I'm your TravelTrack AI Agent. How can I help with your trip to **{active_trip.get('destination')}** today? "
+                "You can ask about your schedule, check your remaining budget, or find sights to explore."
+            )
+
+        return (
+            f"{salutation} I'm your TravelTrack AI Agent. What travel adventure can I help you plan or check today? "
+            "You can ask me to explore attractions in any city, inspect your budget, check your itinerary, or manage your wishlist."
+        )
+
+    async def _handle_conversational_chat(
+        self,
+        user_message: str,
+        greeting_type: str,
+        chat_history: List[Dict[str, Any]],
+        active_trip: Optional[Dict[str, Any]] = None
+    ) -> str:
+        """
+        Routes chat message to real LLM (Gemini / OpenAI) or dynamic contextual generator.
+        """
+        llm_reply = await self.llm_client.generate_response(
+            system_prompt=TRAVEL_AGENT_SYSTEM_PROMPT,
+            user_message=user_message,
+            chat_history=chat_history
+        )
+        if llm_reply:
+            return llm_reply
+
+        return self._generate_natural_chat_response(
+            user_message=user_message,
+            greeting_type=greeting_type,
+            active_trip=active_trip
+        )
+
+    def _detect_place_search(self, msg_text: str) -> Optional[Dict[str, Any]]:
+        """
+        Detect place search intent and extract destination/landmark and category.
+        Returns None if not a search intent.
+        """
+        t_low = msg_text.lower().strip()
+
+        # Exclude other intents: trips, budget, expenses, itinerary, wishlist, confirmation
+        if any(p in t_low for p in ["my trip", "my trips", "delete trip", "create trip", "create a trip", "plan trip",
+                                   "my budget", "check budget", "check my budget", "budget left", "what's my budget", "what is my budget",
+                                   "my expense", "my expenses", "add expense", "delete expense", "log expense",
+                                   "my itinerary", "on day", "doing tomorrow", "schedule on", "add activity",
+                                   "my wishlist", "add to wishlist", "remove from wishlist",
+                                   "add the first", "add the second", "add that place"]):
+            return None
+
+        SEARCH_PATTERNS = [
+            r"\b(?:find|search|explore|discover|recommend|look\s+for|show(?:\s+me)?|suggest)\b",
+            r"\b(?:places\s+to\s+(?:visit|see|go)|things\s+to\s+do|sights|attractions|monuments|spots|famous\s+places)\b",
+            r"\b(?:what\s+should\s+i\s+(?:visit|see)|what\s+to\s+(?:see|visit|do))\b",
+            r"\b(?:hotels?|resorts?|places\s+to\s+stay|hostels?|lodging)\b",
+            r"\b(?:restaurants?|cafes?|food|dining|places\s+to\s+eat)\b"
+        ]
+
+        has_search_verb = any(re.search(pat, t_low) for pat in SEARCH_PATTERNS)
+        if not has_search_verb:
+            return None
+
+        # Determine category
+        cat = "all"
+        if any(w in t_low for w in ["hotel", "stay", "resort", "lodging", "hostel", "accommodation"]):
+            cat = "hotels"
+        elif any(w in t_low for w in ["restaurant", "cafe", "food", "dining", "eat", "lunch", "dinner", "breakfast"]):
+            cat = "restaurants"
+        elif any(w in t_low for w in ["attraction", "sight", "museum", "historic", "monument", "places to visit", "things to do", "famous places"]):
+            cat = "attractions"
+
+        # Check for nearby landmark: e.g. "near Eiffel Tower", "around Colosseum", "close to Charminar"
+        m_near = re.search(r"\b(?:near|around|close\s+to)\s+([^?.!,]+)", msg_text, re.IGNORECASE)
+        if m_near:
+            target = m_near.group(1).strip()
+            target = re.sub(r"\b(please|thanks|thank you)\b", "", target, flags=re.IGNORECASE).strip()
+            if len(target) >= 2:
+                return {
+                    "is_nearby": True,
+                    "target": target,
+                    "category": cat
+                }
+
+        # Check for destination: e.g. "in Kolkata", "to visit in Paris", "for Tokyo"
+        m_in = re.search(r"\b(?:in|at|for|to\s+visit\s+in|of)\s+([^?.!,]+)", msg_text, re.IGNORECASE)
+        if m_in:
+            target = m_in.group(1).strip()
+            target = re.sub(r"\b(please|thanks|thank you)\b", "", target, flags=re.IGNORECASE).strip()
+            if len(target) >= 2:
+                return {
+                    "is_nearby": False,
+                    "target": target,
+                    "category": cat
+                }
+
+        # Direct search target after search verb (e.g. "explore Paris", "search Kyoto")
+        m_direct = re.search(r"\b(?:explore|search|visit)\s+([a-zA-Z\s]{2,30})$", msg_text, re.IGNORECASE)
+        if m_direct:
+            cand = m_direct.group(1).strip()
+            if cand.lower() not in ["places", "attractions", "hotels", "restaurants", "sights", "more", "trip", "itinerary"]:
+                return {
+                    "is_nearby": False,
+                    "target": cand,
+                    "category": cat
+                }
+
+        # User asked to search places, but NO location was specified (e.g. "Find places", "Find restaurants")
+        return {
+            "is_nearby": False,
+            "target": None,
+            "category": cat
+        }
 
     def _extract_amount(self, text: str) -> Optional[float]:
         """Extract monetary amounts (e.g. ₹1,200, Rs 500, $45, 1200)."""
@@ -921,9 +1238,39 @@ class TravelTrackAIAgent:
                     "mutation_occurred": False
                 }
 
-        # Identify active trip context
+        # Identify active trip context (strictly explicit, no silent guessing)
         active_trip = self._resolve_active_trip(user_id, explicit_trip_id, context)
         active_trip_id = active_trip["_id"] if active_trip else None
+
+        # -------------------------------------------------------------
+        # 1. GREETINGS / CASUAL CONVERSATION / ACKNOWLEDGMENTS
+        # -------------------------------------------------------------
+        is_greeting, g_type = self._is_greeting_or_casual(msg_text)
+        if is_greeting:
+            reply = await self._handle_conversational_chat(
+                user_message=msg_text,
+                greeting_type=g_type,
+                chat_history=session_doc.get("messages", []),
+                active_trip=active_trip
+            )
+            self.memory.save_turn(
+                user_id=user_id,
+                conversation_id=cid,
+                user_message=msg_text,
+                ai_message=reply,
+                context_updates={},
+                tool_called=None,
+                tool_result=None,
+                action_status="read_only"
+            )
+            return {
+                "response": reply,
+                "conversation_id": cid,
+                "tool_called": None,
+                "tool_result": None,
+                "action_status": "read_only",
+                "places": []
+            }
 
         # -------------------------------------------------------------
         # B. INTENT: DESTRUCTIVE ACTIONS (REQUIRES CONFIRMATION)
@@ -1415,14 +1762,21 @@ class TravelTrackAIAgent:
 
         # 12. Check budget (e.g. "Check my budget", "How much budget do I have left?", "How much do I have left?")
         if any(p in msg_low for p in ["budget", "how much do i have left", "how much left", "remaining funds", "spending"]):
-            if not active_trip_id:
+            target_trip_id = active_trip_id
+            if not target_trip_id:
                 trips_res = self.tools.get_user_trips(user_id)
                 trips = trips_res.get("trips", [])
                 if not trips:
                     return {"response": "You haven't created any trips yet. Say 'Create a new trip to Paris' to start planning!", "conversation_id": cid}
-                active_trip_id = trips[0]["_id"]
+                if len(trips) == 1:
+                    target_trip_id = trips[0]["_id"]
+                else:
+                    trip_list = ", ".join(f"'{t['title']}' ({t['destination']})" for t in trips[:3])
+                    reply = f"You have multiple trips ({trip_list}). Which trip's budget would you like to check?"
+                    self.memory.save_turn(user_id, cid, msg_text, reply, {}, action_status="read_only")
+                    return {"response": reply, "conversation_id": cid, "tool_called": None, "action_status": "read_only"}
 
-            budget_data = self.tools.get_budget(user_id, active_trip_id)
+            budget_data = self.tools.get_budget(user_id, target_trip_id)
             if not budget_data["success"]:
                 return {"response": f"Could not retrieve budget: {budget_data.get('error')}", "conversation_id": cid}
 
@@ -1443,7 +1797,7 @@ class TravelTrackAIAgent:
                     lines.append(f"• {cat}: ₹{amt:,.2f}")
 
             reply = "\n".join(lines)
-            self.memory.save_turn(user_id, cid, msg_text, reply, {"active_trip_id": active_trip_id}, tool_called="get_budget", tool_result=budget_data, action_status="read_only")
+            self.memory.save_turn(user_id, cid, msg_text, reply, {"active_trip_id": target_trip_id}, tool_called="get_budget", tool_result=budget_data, action_status="read_only")
             return {
                 "response": reply,
                 "conversation_id": cid,
@@ -1452,25 +1806,34 @@ class TravelTrackAIAgent:
                 "action_status": "read_only"
             }
 
-        # 13. Read itinerary (e.g. "Read my itinerary", "What am I doing on Day 1?", "Plan tomorrow for me")
+        # 13. Read itinerary (e.g. "Read my itinerary", "What am I doing on Day 1?", "What am I doing tomorrow?")
         if any(p in msg_low for p in ["itinerary", "what am i doing", "what's scheduled", "schedule", "plan tomorrow", "what do i have"]):
-            if not active_trip_id:
-                return {"response": "Please select or create a trip first to review your itinerary.", "conversation_id": cid}
+            target_trip_id = active_trip_id
+            target_trip = active_trip
+            if not target_trip_id:
+                trips_res = self.tools.get_user_trips(user_id)
+                trips = trips_res.get("trips", [])
+                if not trips:
+                    return {"response": "Please select or create a trip first to review your itinerary.", "conversation_id": cid}
+                if len(trips) == 1:
+                    target_trip_id = trips[0]["_id"]
+                    target_trip = trips[0]
+                else:
+                    trip_list = ", ".join(f"'{t['title']}'" for t in trips[:3])
+                    reply = f"You have multiple trips ({trip_list}). Please specify which trip's itinerary you'd like to check."
+                    self.memory.save_turn(user_id, cid, msg_text, reply, {}, action_status="read_only")
+                    return {"response": reply, "conversation_id": cid, "tool_called": None, "action_status": "read_only"}
 
-            day_req = None
-            if "day " in msg_low:
-                m = re.search(r"day\s*(\d+)", msg_low)
-                if m:
-                    day_req = int(m.group(1))
-            elif "tomorrow" in msg_low:
+            day_req = self._extract_day_number(msg_text, target_trip)
+            if "tomorrow" in msg_low:
                 day_req = 2
 
-            itin_res = self.tools.get_itinerary(user_id, active_trip_id, day_number=day_req)
+            itin_res = self.tools.get_itinerary(user_id, target_trip_id, day_number=day_req)
             acts = itin_res.get("activities", [])
 
             if not acts:
                 target_str = f"Day {day_req}" if day_req else "this trip"
-                reply = f"You don't have any activities scheduled for {target_str} in '**{itin_res.get('trip_title')}**'.\n\nWould you like me to find top places in **{itin_res.get('destination')}** to add?"
+                reply = f"You don't have any activities scheduled for {target_str} in '**{itin_res.get('trip_title')}**'.\n\nWould you like to find top places to visit and add them?"
             else:
                 lines = [f"📅 **Itinerary for {itin_res.get('trip_title')}**" + (f" (Day {day_req}):" if day_req else ":")]
                 curr_day = None
@@ -1485,7 +1848,7 @@ class TravelTrackAIAgent:
 
                 reply = "\n".join(lines)
 
-            self.memory.save_turn(user_id, cid, msg_text, reply, {"active_trip_id": active_trip_id}, tool_called="get_itinerary", tool_result=itin_res, action_status="read_only")
+            self.memory.save_turn(user_id, cid, msg_text, reply, {"active_trip_id": target_trip_id}, tool_called="get_itinerary", tool_result=itin_res, action_status="read_only")
             return {
                 "response": reply,
                 "conversation_id": cid,
@@ -1517,10 +1880,18 @@ class TravelTrackAIAgent:
 
         # 15. Check expenses list (e.g. "Check my expenses", "Show my expenses")
         if "expense" in msg_low and ("show" in msg_low or "list" in msg_low or "read" in msg_low or "check" in msg_low):
-            if not active_trip_id:
-                return {"response": "Please select a trip to view its expense breakdown.", "conversation_id": cid}
+            target_trip_id = active_trip_id
+            if not target_trip_id:
+                trips_res = self.tools.get_user_trips(user_id)
+                trips = trips_res.get("trips", [])
+                if not trips:
+                    return {"response": "Please create or select a trip first to view expense details.", "conversation_id": cid}
+                if len(trips) == 1:
+                    target_trip_id = trips[0]["_id"]
+                else:
+                    return {"response": "Please select a trip to view its expense breakdown.", "conversation_id": cid}
 
-            exp_res = self.tools.get_expenses(user_id, active_trip_id)
+            exp_res = self.tools.get_expenses(user_id, target_trip_id)
             exps = exp_res.get("expenses", [])
             if not exps:
                 reply = f"No expenses recorded yet for '**{exp_res.get('trip_title')}**'. Say 'Add an expense of ₹500 for lunch' to record one."
@@ -1561,40 +1932,42 @@ class TravelTrackAIAgent:
                 "action_status": "read_only"
             }
 
-        # 17. Explore / Place Search (e.g. "Find good places in Hyderabad", "Find hotels in Goa", "What should I see in Tokyo?")
-        search_query = None
-        category = "all"
-        if any(w in msg_low for w in ["hotel", "stay", "resort"]):
-            category = "hotels"
-        elif any(w in msg_low for w in ["restaurant", "cafe", "food", "dining"]):
-            category = "restaurants"
-        elif any(w in msg_low for w in ["attraction", "sight", "museum", "historic", "places", "see"]):
-            category = "attractions"
+        # 17. Explore / Place Search (STRICT VALIDATION, ZERO DEFAULT DESTINATIONS)
+        search_intent = self._detect_place_search(msg_text)
+        if search_intent:
+            target_query = search_intent["target"]
+            category = search_intent["category"]
+            is_nearby = search_intent["is_nearby"]
 
-        # Detect destination query
-        for trigger in ["in ", "near ", "around ", "for ", "to "]:
-            if trigger in msg_low:
-                parts = msg_text.split(trigger, 1)
-                if len(parts) > 1:
-                    raw_q = parts[1].split("?")[0].split(".")[0].strip()
-                    if raw_q:
-                        search_query = raw_q
-                        break
+            # If user wants to find places but gave NO location (e.g. "Find places", "Find restaurants")
+            if not target_query:
+                reply = (
+                    "Which destination or city would you like to explore? "
+                    "(For example, ask: *'Find top attractions in Kolkata'* or *'Find restaurants near Eiffel Tower'*)"
+                )
+                self.memory.save_turn(user_id, cid, msg_text, reply, {}, action_status="read_only")
+                return {
+                    "response": reply,
+                    "conversation_id": cid,
+                    "tool_called": None,
+                    "action_status": "read_only",
+                    "places": []
+                }
 
-        if not search_query and active_trip:
-            search_query = active_trip.get("destination")
+            # Execute place search or nearby search
+            if is_nearby:
+                search_res = await self.tools.find_nearby_places(target_query, category=category, radius=3000)
+                places = search_res.get("places", [])
+                tool_called_name = "find_nearby_places"
+                title_header = f"📍 **Places found near {target_query}:**"
+            else:
+                search_res = await self.tools.search_places(target_query, category=category, limit=6)
+                places = search_res.get("places", [])
+                tool_called_name = "search_places"
+                title_header = f"📍 **Here are verified recommendations for {target_query}:**"
 
-        if not search_query:
-            # Check if general inquiry
-            clean_search = re.sub(r"\b(find|search|show|get|give me|places|attractions|hotels|restaurants)\b", "", msg_text, flags=re.IGNORECASE).strip()
-            if len(clean_search) >= 3:
-                search_query = clean_search
-
-        if search_query:
-            search_res = await self.tools.search_places(search_query, category=category, limit=6)
-            places = search_res.get("places", [])
             if places:
-                lines = [f"📍 **Here are verified recommendations for {search_query}:**"]
+                lines = [title_header]
                 for i, p in enumerate(places, 1):
                     cat_name = p.get("category", "sight").title()
                     addr = p.get("address") or p.get("location") or ""
@@ -1617,7 +1990,7 @@ class TravelTrackAIAgent:
                         "last_recommended_places": places,
                         "last_mentioned_place": places[0] if places else None
                     },
-                    tool_called="search_places",
+                    tool_called=tool_called_name,
                     tool_result=search_res,
                     action_status="read_only",
                     places=places
@@ -1625,31 +1998,39 @@ class TravelTrackAIAgent:
                 return {
                     "response": reply,
                     "conversation_id": cid,
-                    "tool_called": "search_places",
+                    "tool_called": tool_called_name,
                     "tool_result": search_res,
                     "action_status": "read_only",
                     "places": places
                 }
+            else:
+                reply = f"I couldn't find any places matching '{target_query}'. Please verify the spelling or try a nearby city or landmark."
+                self.memory.save_turn(user_id, cid, msg_text, reply, {}, tool_called=tool_called_name, tool_result=search_res, action_status="read_only")
+                return {
+                    "response": reply,
+                    "conversation_id": cid,
+                    "tool_called": tool_called_name,
+                    "tool_result": search_res,
+                    "action_status": "read_only",
+                    "places": []
+                }
 
         # -------------------------------------------------------------
-        # E. DEFAULT ASSISTANT RESPONSE WITH CONTEXTUAL GUIDANCE
+        # E. DEFAULT CONVERSATIONAL / ASSISTANT RESPONSE
         # -------------------------------------------------------------
-        trip_context_note = f" (Current Trip: **{active_trip.get('title')}**)" if active_trip else ""
-        reply = (
-            f"I am your TravelTrack AI Agent{trip_context_note}. I can read and update your real trips, itineraries, budgets, and explore places worldwide.\n\n"
-            "Here are things you can ask me to do:\n"
-            "• **Explore:** *'Find top attractions in Hyderabad'* or *'Find cafes near Eiffel Tower'*\n"
-            "• **Itinerary Actions:** *'Add Charminar to Day 3'* or *'Move Nishiki Market to Day 2'*\n"
-            "• **Finances:** *'How much budget do I have left?'* or *'Add an expense of ₹1,200 for dinner'*\n"
-            "• **Wishlist:** *'Add the first one to my wishlist'* or *'Show my wishlist'*\n"
-            "• **Trips:** *'Create a new trip to Paris'* or *'Read my trips'*"
+        reply = await self._handle_conversational_chat(
+            user_message=msg_text,
+            greeting_type="general",
+            chat_history=session_doc.get("messages", []),
+            active_trip=active_trip
         )
-
         self.memory.save_turn(user_id, cid, msg_text, reply, {}, action_status="read_only")
         return {
             "response": reply,
             "conversation_id": cid,
-            "action_status": "read_only"
+            "tool_called": None,
+            "action_status": "read_only",
+            "places": []
         }
 
 
