@@ -1005,25 +1005,379 @@ class TravelTrackAIAgent:
             is_new_conversation=is_new_conversation
         )
 
+    @staticmethod
+    def _parse_natural_date(text: str) -> Optional[date]:
+        """
+        Robust natural language date parser.
+        Understands:
+        - Relative dates: 'today', 'tomorrow', 'day after tomorrow', 'in 3 days', 'in a week', 'next monday'
+        - Month names: 'November 1st', 'Nov 1', '1 November', '15th December 2026', 'Dec 25'
+        - ISO formats: '2026-11-01', '2026/11/01'
+        """
+        t = text.lower().strip()
+        today = date.today()
+
+        if "today" in t:
+            return today
+        if "day after tomorrow" in t:
+            return today + timedelta(days=2)
+        if "tomorrow" in t:
+            return today + timedelta(days=1)
+
+        m_days = re.search(r"\bin\s+(\d+)\s+days?\b", t)
+        if m_days:
+            return today + timedelta(days=int(m_days.group(1)))
+
+        if "in a week" in t or "in 1 week" in t:
+            return today + timedelta(days=7)
+        if "in 2 weeks" in t:
+            return today + timedelta(days=14)
+
+        WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+        for idx, wday in enumerate(WEEKDAYS):
+            if f"next {wday}" in t or f"this {wday}" in t:
+                days_ahead = idx - today.weekday()
+                if days_ahead <= 0:
+                    days_ahead += 7
+                return today + timedelta(days=days_ahead)
+
+        # ISO format YYYY-MM-DD or YYYY/MM/DD
+        m_iso = re.search(r"\b(\d{4})[-/](\d{1,2})[-/](\d{1,2})\b", t)
+        if m_iso:
+            try:
+                return date(int(m_iso.group(1)), int(m_iso.group(2)), int(m_iso.group(3)))
+            except ValueError:
+                pass
+
+        MONTHS = {
+            "january": 1, "jan": 1, "february": 2, "feb": 2, "march": 3, "mar": 3,
+            "april": 4, "apr": 4, "may": 5, "june": 6, "jun": 6, "july": 7, "jul": 7,
+            "august": 8, "aug": 8, "september": 9, "sep": 9, "sept": 9, "october": 10, "oct": 10,
+            "november": 11, "nov": 11, "december": 12, "dec": 12
+        }
+
+        # Month Name + Day (e.g. "November 1st", "Nov 1", "Nov 1, 2026")
+        m_md = re.search(
+            r"\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(\d{1,2})(?:st|nd|rd|th)?(?:\s*,?\s*(\d{4}))?\b",
+            t
+        )
+        if m_md:
+            m_str = m_md.group(1)
+            d_int = int(m_md.group(2))
+            y_int = int(m_md.group(3)) if m_md.group(3) else today.year
+            if 1 <= d_int <= 31 and m_str in MONTHS:
+                try:
+                    res_d = date(y_int, MONTHS[m_str], d_int)
+                    if not m_md.group(3) and res_d < today:
+                        res_d = date(y_int + 1, MONTHS[m_str], d_int)
+                    return res_d
+                except ValueError:
+                    pass
+
+        # Day + Month Name (e.g. "1st November", "1 Nov", "15th of December 2026")
+        m_dm = re.search(
+            r"\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)(?:\s*,?\s*(\d{4}))?\b",
+            t
+        )
+        if m_dm:
+            d_int = int(m_dm.group(1))
+            m_str = m_dm.group(2)
+            y_int = int(m_dm.group(3)) if m_dm.group(3) else today.year
+            if 1 <= d_int <= 31 and m_str in MONTHS:
+                try:
+                    res_d = date(y_int, MONTHS[m_str], d_int)
+                    if not m_dm.group(3) and res_d < today:
+                        res_d = date(y_int + 1, MONTHS[m_str], d_int)
+                    return res_d
+                except ValueError:
+                    pass
+
+        return None
+
+    def _match_trip_from_text(self, user_id: str, text: str) -> Optional[Dict[str, Any]]:
+        """
+        Matches user's actual trips against text using destination, title, or index.
+        """
+        trips_res = self.tools.get_user_trips(user_id)
+        trips = trips_res.get("trips", [])
+        if not trips:
+            return None
+
+        t_low = text.lower().strip()
+        clean = re.sub(r"[^\w\s]", "", t_low)
+
+        # Exact or partial match on destination or title
+        for t in trips:
+            dest = t.get("destination", "").lower()
+            title = t.get("title", "").lower()
+            if dest and (dest == t_low or dest in t_low or t_low in dest or dest in clean):
+                return t
+            if title and (title == t_low or title in t_low or t_low in title or title in clean):
+                return t
+
+        # Match ordinals or numbers: "first", "1", "second", "2"
+        if clean in ["1", "first", "1st", "first trip"] and len(trips) >= 1:
+            return trips[0]
+        if clean in ["2", "second", "2nd", "second trip"] and len(trips) >= 2:
+            return trips[1]
+        if clean in ["3", "third", "3rd", "third trip"] and len(trips) >= 3:
+            return trips[2]
+
+        return None
+
+    async def _handle_pending_clarification(
+        self,
+        user_id: str,
+        msg_text: str,
+        pending: Dict[str, Any],
+        cid: str,
+        session_doc: Dict[str, Any],
+        active_trip: Optional[Dict[str, Any]]
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Evaluates a user message as the answer to an outstanding clarification question.
+        Returns a complete API response dictionary if handled, or None if clarification was abandoned.
+        """
+        p_type = pending.get("type")
+        msg_low = msg_text.lower().strip()
+
+        # Cancellation check
+        if msg_low in ["cancel", "stop", "nevermind", "never mind", "abort", "no"]:
+            reply = "Understood. Cancelled that request. What else can I help you with?"
+            self.memory.save_turn(
+                user_id=user_id,
+                conversation_id=cid,
+                user_message=msg_text,
+                ai_message=reply,
+                context_updates={"pending_clarification": None},
+                action_status="cancelled"
+            )
+            return {
+                "response": reply,
+                "conversation_id": cid,
+                "tool_called": None,
+                "action_status": "cancelled",
+                "places": []
+            }
+
+        # 1. User is answering: Which trip's budget?
+        if p_type == "which_trip_for_budget":
+            matched_trip = self._match_trip_from_text(user_id, msg_text)
+            if matched_trip:
+                target_trip_id = str(matched_trip["_id"])
+                budget_data = self.tools.get_budget(user_id, target_trip_id)
+                if not budget_data["success"]:
+                    reply = f"Could not retrieve budget: {budget_data.get('error')}"
+                else:
+                    b = budget_data["budget"]
+                    s = budget_data["total_spent"]
+                    r = budget_data["remaining_budget"]
+                    p = budget_data["percentage_spent"]
+                    lines = [
+                        f"💰 **Budget Summary for {budget_data.get('trip_title')} ({budget_data.get('destination')}):**",
+                        f"• **Total Budget:** ₹{b:,.2f}",
+                        f"• **Total Spent:** ₹{s:,.2f} ({p}%)",
+                        f"• **Remaining Budget:** **₹{r:,.2f}**"
+                    ]
+                    if budget_data.get("by_category"):
+                        lines.append("\n**Category Breakdown:**")
+                        for cat, amt in budget_data["by_category"].items():
+                            lines.append(f"• {cat}: ₹{amt:,.2f}")
+                    reply = "\n".join(lines)
+
+                self.memory.save_turn(
+                    user_id=user_id,
+                    conversation_id=cid,
+                    user_message=msg_text,
+                    ai_message=reply,
+                    context_updates={"pending_clarification": None, "active_trip_id": target_trip_id},
+                    tool_called="get_budget",
+                    tool_result=budget_data,
+                    action_status="read_only"
+                )
+                return {
+                    "response": reply,
+                    "conversation_id": cid,
+                    "tool_called": "get_budget",
+                    "tool_result": budget_data,
+                    "action_status": "read_only",
+                    "places": []
+                }
+            else:
+                trips_res = self.tools.get_user_trips(user_id)
+                trips = trips_res.get("trips", [])
+                trip_names = [f"'{t['destination']}'" for t in trips]
+                reply = f"I couldn't match '{msg_text}' to your trips ({', '.join(trip_names)}). Which trip's budget would you like to check?"
+                self.memory.save_turn(user_id, cid, msg_text, reply, {}, action_status="read_only")
+                return {"response": reply, "conversation_id": cid, "tool_called": None, "action_status": "read_only", "places": []}
+
+        # 2. User is answering: What date to change the trip to?
+        if p_type == "new_date_for_trip":
+            target_trip_id = pending.get("trip_id")
+            dest = pending.get("trip_destination", "your trip")
+            new_d = self._parse_natural_date(msg_text)
+            if new_d:
+                trip_doc = trips_collection.find_one({"_id": ObjectId(target_trip_id), "user_id": user_id})
+                new_start_str = new_d.isoformat()
+                new_end_str = new_start_str
+                if trip_doc and trip_doc.get("start_date") and trip_doc.get("end_date"):
+                    try:
+                        old_s = date.fromisoformat(trip_doc["start_date"])
+                        old_e = date.fromisoformat(trip_doc["end_date"])
+                        dur = max(0, (old_e - old_s).days)
+                        new_end_str = (new_d + timedelta(days=dur)).isoformat()
+                    except Exception:
+                        pass
+
+                res = self.tools.update_trip(user_id, target_trip_id, start_date=new_start_str, end_date=new_end_str)
+                if res["success"]:
+                    reply = f"✅ Updated the dates for your **{dest}** trip! It is now scheduled from **{new_start_str}** to **{new_end_str}**."
+                    status = "executed"
+                else:
+                    reply = f"❌ Failed to update trip date: {res.get('error')}"
+                    status = "failed"
+
+                self.memory.save_turn(
+                    user_id=user_id,
+                    conversation_id=cid,
+                    user_message=msg_text,
+                    ai_message=reply,
+                    context_updates={"pending_clarification": None},
+                    tool_called="update_trip",
+                    tool_result=res,
+                    action_status=status
+                )
+                return {
+                    "response": reply,
+                    "conversation_id": cid,
+                    "tool_called": "update_trip",
+                    "tool_result": res,
+                    "action_status": status,
+                    "mutation_occurred": res["success"],
+                    "affected_entity": "trip",
+                    "places": []
+                }
+            else:
+                reply = f"I couldn't understand '{msg_text}' as a calendar date. Please specify a date like 'November 1st', 'next Monday', or '2026-11-01'."
+                self.memory.save_turn(user_id, cid, msg_text, reply, {}, action_status="read_only")
+                return {"response": reply, "conversation_id": cid, "tool_called": None, "action_status": "read_only", "places": []}
+
+        # 3. User is answering: Which trip to change date for?
+        if p_type == "which_trip_for_date_change":
+            matched_trip = self._match_trip_from_text(user_id, msg_text)
+            new_start_str = pending.get("new_date")
+            if matched_trip and new_start_str:
+                target_trip_id = str(matched_trip["_id"])
+                dest = matched_trip.get("destination", "your trip")
+                new_d = date.fromisoformat(new_start_str)
+                new_end_str = new_start_str
+                if matched_trip.get("start_date") and matched_trip.get("end_date"):
+                    try:
+                        old_s = date.fromisoformat(matched_trip["start_date"])
+                        old_e = date.fromisoformat(matched_trip["end_date"])
+                        dur = max(0, (old_e - old_s).days)
+                        new_end_str = (new_d + timedelta(days=dur)).isoformat()
+                    except Exception:
+                        pass
+
+                res = self.tools.update_trip(user_id, target_trip_id, start_date=new_start_str, end_date=new_end_str)
+                if res["success"]:
+                    reply = f"✅ Updated the dates for your **{dest}** trip! It is now scheduled from **{new_start_str}** to **{new_end_str}**."
+                    status = "executed"
+                else:
+                    reply = f"❌ Failed to update trip date: {res.get('error')}"
+                    status = "failed"
+
+                self.memory.save_turn(
+                    user_id=user_id,
+                    conversation_id=cid,
+                    user_message=msg_text,
+                    ai_message=reply,
+                    context_updates={"pending_clarification": None},
+                    tool_called="update_trip",
+                    tool_result=res,
+                    action_status=status
+                )
+                return {
+                    "response": reply,
+                    "conversation_id": cid,
+                    "tool_called": "update_trip",
+                    "tool_result": res,
+                    "action_status": status,
+                    "mutation_occurred": res["success"],
+                    "affected_entity": "trip",
+                    "places": []
+                }
+
+        # 4. User is answering: Which place to add to wishlist?
+        if p_type == "which_place_for_wishlist":
+            clean_name = msg_text.strip()
+            search_res = await self.tools.search_places(clean_name, limit=1)
+            found_places = search_res.get("places", [])
+            if found_places:
+                p = found_places[0]
+                name = p["name"]
+                pid = p.get("place_id") or p.get("id") or f"wish_{uuid.uuid4().hex[:8]}"
+                loc = p.get("address") or p.get("location") or ""
+                cat = p.get("category", "attraction")
+                img = p.get("image_url")
+            else:
+                name = clean_name.title()
+                pid = f"wish_{uuid.uuid4().hex[:8]}"
+                loc = ""
+                cat = "attraction"
+                img = None
+
+            res = self.tools.add_wishlist(user_id, pid, name, cat, loc, img)
+            if res["success"]:
+                reply = f"✅ Added **{name}** to your saved wishlist."
+                status = "executed"
+            else:
+                reply = f"❌ Could not add to wishlist: {res.get('error')}"
+                status = "failed"
+
+            self.memory.save_turn(
+                user_id=user_id,
+                conversation_id=cid,
+                user_message=msg_text,
+                ai_message=reply,
+                context_updates={"pending_clarification": None, "last_mentioned_place": {"name": name, "place_id": pid}},
+                tool_called="add_wishlist",
+                tool_result=res,
+                action_status=status
+            )
+            return {
+                "response": reply,
+                "conversation_id": cid,
+                "tool_called": "add_wishlist",
+                "tool_result": res,
+                "action_status": status,
+                "mutation_occurred": res["success"],
+                "affected_entity": "wishlist",
+                "places": []
+            }
+
+        return None
+
     def _detect_place_search(self, msg_text: str) -> Optional[Dict[str, Any]]:
         """
         Detect place search intent and extract destination/landmark and category.
-        Returns None if not a search intent.
+        Strictly excludes any action intents, mutations, or clarification answers.
         """
         t_low = msg_text.lower().strip()
 
-        # 1. Exclude other operational intents: trips, budget, expenses, itinerary, wishlist, confirmation
-        EXCLUSIONS = [
-            "my trip", "my trips", "delete trip", "create trip", "create a trip", "plan trip",
-            "my budget", "check budget", "check my budget", "budget left", "what's my budget", "what is my budget",
-            "how much budget", "how much do i have left", "how much left", "spending",
-            "my expense", "my expenses", "add expense", "delete expense", "log expense",
-            "my itinerary", "on day", "doing tomorrow", "what am i doing", "schedule on", "add activity",
-            "my wishlist", "add to wishlist", "remove from wishlist",
-            "add the first", "add the second", "add that place"
+        # 1. Strict exclusion of action words, functional commands, and confirmation words
+        ACTION_STEMS = [
+            "trip", "trips", "budget", "expense", "expenses", "itinerary", "wishlist", "wishkist", "bucketlist",
+            "add", "delete", "remove", "cancel", "update", "change", "reschedule", "move", "create", "plan",
+            "yes", "no", "ok", "okay", "sure", "thanks", "thank you", "hello", "hi", "hey",
+            "doing tomorrow", "what am i doing", "how much", "remaining", "spent", "spending"
         ]
-        if any(p in t_low for p in EXCLUSIONS):
-            return None
+        words = t_low.split()
+        if any(w in ACTION_STEMS for w in words):
+            # If it has action words, it can ONLY be a search if it explicitly has "places in <city>" or "hotels in <city>"
+            if not any(phrase in t_low for phrase in ["places in", "sights in", "attractions in", "hotels in", "restaurants in", "things to do in"]):
+                return None
 
         # 2. Determine category
         cat = "all"
@@ -1093,22 +1447,22 @@ class TravelTrackAIAgent:
                     "target": clean_search,
                     "category": cat
                 }
-            # Search intent was detected, but NO location was provided (e.g. "Find places", "Show hotels")
             return {
                 "is_nearby": False,
                 "target": None,
                 "category": cat
             }
 
-        # 7. Single or short location query: e.g. "mumbai", "tokyo", "paris", "new york", "mumbai places"
-        words = t_low.split()
+        # 7. Single or short location query: e.g. "mumbai", "tokyo", "paris", "new york"
         if 1 <= len(words) <= 3 and len(t_low) >= 3 and not t_low.isdigit():
             clean_word = re.sub(r"[^\w\s]", "", t_low).strip()
             NON_LOCATION_WORDS = [
                 "yes", "no", "ok", "okay", "sure", "cancel", "stop", "help", "who", "what", "why", "when", "how",
-                "test", "demo", "sample", "trip", "itinerary", "budget", "expense", "wishlist"
+                "test", "demo", "sample", "trip", "trips", "itinerary", "budget", "expense", "wishlist", "wishkist",
+                "add", "change", "update", "delete", "remove", "date", "dates", "tomorrow", "today", "yesterday",
+                "november", "december", "january", "february", "march", "april", "may", "june", "july", "august", "september", "october"
             ]
-            if clean_word not in NON_LOCATION_WORDS:
+            if clean_word not in NON_LOCATION_WORDS and not any(w in clean_word for w in ["wish", "trip", "date"]):
                 return {
                     "is_nearby": False,
                     "target": clean_word,
@@ -1192,6 +1546,10 @@ class TravelTrackAIAgent:
         context = session_doc.get("context", {})
         msg_text = message.strip()
         msg_low = msg_text.lower()
+
+        # Identify active trip context (strictly explicit, no silent guessing)
+        active_trip = self._resolve_active_trip(user_id, explicit_trip_id, context)
+        active_trip_id = active_trip["_id"] if active_trip else None
 
         # -------------------------------------------------------------
         # A. HANDLE CONFIRMATION STATE MACHINE FOR PENDING ACTIONS
@@ -1294,9 +1652,21 @@ class TravelTrackAIAgent:
                     "mutation_occurred": False
                 }
 
-        # Identify active trip context (strictly explicit, no silent guessing)
-        active_trip = self._resolve_active_trip(user_id, explicit_trip_id, context)
-        active_trip_id = active_trip["_id"] if active_trip else None
+        # -------------------------------------------------------------
+        # A2. HANDLE PENDING CLARIFICATION (ANSWERING PRIOR AI QUESTION)
+        # -------------------------------------------------------------
+        pending_clarification = context.get("pending_clarification")
+        if pending_clarification:
+            clarification_result = await self._handle_pending_clarification(
+                user_id=user_id,
+                msg_text=msg_text,
+                pending=pending_clarification,
+                cid=cid,
+                session_doc=session_doc,
+                active_trip=active_trip
+            )
+            if clarification_result:
+                return clarification_result
 
         # -------------------------------------------------------------
         # 1. GREETINGS / CASUAL CONVERSATION / ACKNOWLEDGMENTS
@@ -1330,6 +1700,107 @@ class TravelTrackAIAgent:
                 "action_status": "read_only",
                 "places": []
             }
+
+        # -------------------------------------------------------------
+        # 2. INTENT: TRIP DATE & ATTRIBUTE UPDATES (RESCHEDULE / MOVE DATE)
+        # -------------------------------------------------------------
+        if any(p in msg_low for p in [
+            "change the date", "change date", "update the date", "update date",
+            "change trip date", "update trip date", "reschedule trip", "reschedule date",
+            "move date", "change the trip date", "reschedule the trip", "change my trip date"
+        ]):
+            target_trip = self._match_trip_from_text(user_id, msg_text)
+            if not target_trip and active_trip:
+                target_trip = active_trip
+            if not target_trip:
+                all_trips = self.tools.get_user_trips(user_id).get("trips", [])
+                if len(all_trips) == 1:
+                    target_trip = all_trips[0]
+
+            parsed_d = self._parse_natural_date(msg_text)
+
+            if target_trip and parsed_d:
+                new_start_str = parsed_d.isoformat()
+                new_end_str = new_start_str
+                if target_trip.get("start_date") and target_trip.get("end_date"):
+                    try:
+                        old_s = date.fromisoformat(target_trip["start_date"])
+                        old_e = date.fromisoformat(target_trip["end_date"])
+                        dur = max(0, (old_e - old_s).days)
+                        new_end_str = (parsed_d + timedelta(days=dur)).isoformat()
+                    except Exception:
+                        pass
+
+                res = self.tools.update_trip(user_id, str(target_trip["_id"]), start_date=new_start_str, end_date=new_end_str)
+                if res["success"]:
+                    reply = f"✅ Updated the dates for your **{target_trip['destination']}** trip! It is now scheduled from **{new_start_str}** to **{new_end_str}**."
+                    status = "executed"
+                else:
+                    reply = f"❌ Failed to update trip date: {res.get('error')}"
+                    status = "failed"
+
+                self.memory.save_turn(
+                    user_id=user_id,
+                    conversation_id=cid,
+                    user_message=msg_text,
+                    ai_message=reply,
+                    context_updates={"pending_clarification": None, "active_trip_id": str(target_trip["_id"])},
+                    tool_called="update_trip",
+                    tool_result=res,
+                    action_status=status
+                )
+                return {
+                    "response": reply,
+                    "conversation_id": cid,
+                    "tool_called": "update_trip",
+                    "tool_result": res,
+                    "action_status": status,
+                    "mutation_occurred": res["success"],
+                    "affected_entity": "trip"
+                }
+
+            elif target_trip and not parsed_d:
+                dest = target_trip.get("destination", "your trip")
+                reply = f"What date would you like to change your **{dest}** trip to? (For example: 'November 1st' or '2026-11-01')"
+                self.memory.save_turn(
+                    user_id=user_id,
+                    conversation_id=cid,
+                    user_message=msg_text,
+                    ai_message=reply,
+                    context_updates={
+                        "pending_clarification": {
+                            "type": "new_date_for_trip",
+                            "trip_id": str(target_trip["_id"]),
+                            "trip_destination": dest
+                        }
+                    },
+                    action_status="read_only"
+                )
+                return {"response": reply, "conversation_id": cid, "tool_called": None, "action_status": "read_only", "places": []}
+
+            elif not target_trip and parsed_d:
+                all_trips = self.tools.get_user_trips(user_id).get("trips", [])
+                trip_names = [f"'{t['destination']}'" for t in all_trips]
+                reply = f"Which trip would you like to change the date for? ({', '.join(trip_names)})"
+                self.memory.save_turn(
+                    user_id=user_id,
+                    conversation_id=cid,
+                    user_message=msg_text,
+                    ai_message=reply,
+                    context_updates={
+                        "pending_clarification": {
+                            "type": "which_trip_for_date_change",
+                            "new_date": parsed_d.isoformat()
+                        }
+                    },
+                    action_status="read_only"
+                )
+                return {"response": reply, "conversation_id": cid, "tool_called": None, "action_status": "read_only", "places": []}
+
+            else:
+                reply = "Which trip would you like to update, and what new date would you like to set?"
+                self.memory.save_turn(user_id, cid, msg_text, reply, {}, action_status="read_only")
+                return {"response": reply, "conversation_id": cid, "tool_called": None, "action_status": "read_only", "places": []}
 
         # -------------------------------------------------------------
         # B. INTENT: DESTRUCTIVE ACTIONS (REQUIRES CONFIRMATION)
@@ -1608,8 +2079,8 @@ class TravelTrackAIAgent:
                 "affected_entity": "expense"
             }
 
-        # 7. Add to wishlist (e.g. "Add Eiffel Tower to my wishlist" or "Add the first one to my wishlist")
-        if "wishlist" in msg_low and ("add" in msg_low or "save" in msg_low):
+        # 7. Add to wishlist (e.g. "Add Eiffel Tower to my wishlist", "Add the first one to my wishlist", "add to wishkist")
+        if any(w in msg_low for w in ["wishlist", "wishkist", "wish list", "bucket list"]) and any(w in msg_low for w in ["add", "save", "put", "keep", "favorite", "favourite"]):
             ref_place = self._resolve_place_reference(msg_text, context)
             if ref_place:
                 name = ref_place["name"]
@@ -1619,12 +2090,34 @@ class TravelTrackAIAgent:
                 cat = ref_place.get("category", "attraction")
             else:
                 # Extract place name from query
-                m = re.search(r"add\s+(?:the\s+)?(.+?)\s+to\s+(?:my\s+)?wishlist", msg_text, re.IGNORECASE)
-                name = m.group(1).strip() if m else "Saved Sight"
-                pid = f"wish_{uuid.uuid4().hex[:8]}"
-                loc = active_trip.get("destination", "") if active_trip else ""
-                img = None
-                cat = "attraction"
+                m = re.search(r"add\s+(?:the\s+)?(.+?)\s+to\s+(?:my\s+)?(?:wishlist|wishkist|wish\s*list)", msg_text, re.IGNORECASE)
+                cand_name = m.group(1).strip() if m else ""
+                cand_clean = re.sub(r"\b(please|this|that|it|the|a|place|sight)\b", "", cand_name, flags=re.IGNORECASE).strip()
+
+                if cand_clean and len(cand_clean) >= 2:
+                    name = cand_clean.title()
+                    pid = f"wish_{uuid.uuid4().hex[:8]}"
+                    loc = active_trip.get("destination", "") if active_trip else ""
+                    img = None
+                    cat = "attraction"
+                else:
+                    # Missing place! NEVER fabricate! NEVER call search_places!
+                    reply = "Sure — which place would you like me to add to your wishlist?"
+                    self.memory.save_turn(
+                        user_id=user_id,
+                        conversation_id=cid,
+                        user_message=msg_text,
+                        ai_message=reply,
+                        context_updates={"pending_clarification": {"type": "which_place_for_wishlist"}},
+                        action_status="read_only"
+                    )
+                    return {
+                        "response": reply,
+                        "conversation_id": cid,
+                        "tool_called": None,
+                        "action_status": "read_only",
+                        "places": []
+                    }
 
             res = self.tools.add_wishlist(user_id, pid, name, cat, loc, img)
             if res["success"]:
@@ -1634,7 +2127,7 @@ class TravelTrackAIAgent:
                 reply = f"❌ Could not add to wishlist: {res.get('error')}"
                 status = "failed"
 
-            self.memory.save_turn(user_id, cid, msg_text, reply, {}, tool_called="add_wishlist", tool_result=res, action_status=status)
+            self.memory.save_turn(user_id, cid, msg_text, reply, {"last_mentioned_place": {"name": name, "place_id": pid}}, tool_called="add_wishlist", tool_result=res, action_status=status)
             return {
                 "response": reply,
                 "conversation_id": cid,
@@ -1819,20 +2312,45 @@ class TravelTrackAIAgent:
         # D. INTENT: READ & REASONING ACTIONS
         # -------------------------------------------------------------
 
+        # Ordinal reference alone (e.g. "the second one", "the first one")
+        if any(msg_low == p or msg_low.startswith(p + " ") for p in [
+            "the first one", "the second one", "the third one", "the fourth one",
+            "the 1st one", "the 2nd one", "the 3rd one", "first one", "second one", "third one"
+        ]):
+            ref_place = self._resolve_place_reference(msg_text, context)
+            if ref_place:
+                name = ref_place["name"]
+                cat_name = ref_place.get("category", "sight").title()
+                addr = ref_place.get("address") or ref_place.get("location") or ""
+                reply = f"Selected **{name}** ({cat_name})" + (f" in {addr}." if addr else ".") + "\n\nWould you like me to schedule this to a specific day (e.g. *'Add it to Day 2'*) or save it to your wishlist?"
+                self.memory.save_turn(user_id, cid, msg_text, reply, {"last_mentioned_place": ref_place}, action_status="read_only")
+                return {"response": reply, "conversation_id": cid, "tool_called": None, "action_status": "read_only", "places": [ref_place]}
+
         # 12. Check budget (e.g. "Check my budget", "How much budget do I have left?", "How much do I have left?")
         if any(p in msg_low for p in ["budget", "how much do i have left", "how much left", "remaining funds", "spending"]):
-            target_trip_id = active_trip_id
-            if not target_trip_id:
+            target_trip = self._match_trip_from_text(user_id, msg_text)
+            if target_trip:
+                target_trip_id = str(target_trip["_id"])
+            elif active_trip_id:
+                target_trip_id = active_trip_id
+            else:
                 trips_res = self.tools.get_user_trips(user_id)
                 trips = trips_res.get("trips", [])
                 if not trips:
                     return {"response": "You haven't created any trips yet. Say 'Create a new trip to Paris' to start planning!", "conversation_id": cid}
                 if len(trips) == 1:
-                    target_trip_id = trips[0]["_id"]
+                    target_trip_id = str(trips[0]["_id"])
                 else:
-                    trip_list = ", ".join(f"'{t['title']}' ({t['destination']})" for t in trips[:3])
+                    trip_list = ", ".join(f"'{t['destination']}'" for t in trips[:4])
                     reply = f"You have multiple trips ({trip_list}). Which trip's budget would you like to check?"
-                    self.memory.save_turn(user_id, cid, msg_text, reply, {}, action_status="read_only")
+                    self.memory.save_turn(
+                        user_id=user_id,
+                        conversation_id=cid,
+                        user_message=msg_text,
+                        ai_message=reply,
+                        context_updates={"pending_clarification": {"type": "which_trip_for_budget"}},
+                        action_status="read_only"
+                    )
                     return {"response": reply, "conversation_id": cid, "tool_called": None, "action_status": "read_only"}
 
             budget_data = self.tools.get_budget(user_id, target_trip_id)
@@ -1867,20 +2385,31 @@ class TravelTrackAIAgent:
 
         # 13. Read itinerary (e.g. "Read my itinerary", "What am I doing on Day 1?", "What am I doing tomorrow?")
         if any(p in msg_low for p in ["itinerary", "what am i doing", "what's scheduled", "schedule", "plan tomorrow", "what do i have"]):
-            target_trip_id = active_trip_id
-            target_trip = active_trip
-            if not target_trip_id:
+            target_trip = self._match_trip_from_text(user_id, msg_text)
+            if target_trip:
+                target_trip_id = str(target_trip["_id"])
+            elif active_trip_id:
+                target_trip_id = active_trip_id
+                target_trip = active_trip
+            else:
                 trips_res = self.tools.get_user_trips(user_id)
                 trips = trips_res.get("trips", [])
                 if not trips:
                     return {"response": "Please select or create a trip first to review your itinerary.", "conversation_id": cid}
                 if len(trips) == 1:
-                    target_trip_id = trips[0]["_id"]
+                    target_trip_id = str(trips[0]["_id"])
                     target_trip = trips[0]
                 else:
-                    trip_list = ", ".join(f"'{t['title']}'" for t in trips[:3])
+                    trip_list = ", ".join(f"'{t['destination']}'" for t in trips[:4])
                     reply = f"You have multiple trips ({trip_list}). Please specify which trip's itinerary you'd like to check."
-                    self.memory.save_turn(user_id, cid, msg_text, reply, {}, action_status="read_only")
+                    self.memory.save_turn(
+                        user_id=user_id,
+                        conversation_id=cid,
+                        user_message=msg_text,
+                        ai_message=reply,
+                        context_updates={"pending_clarification": {"type": "which_trip_for_itinerary"}},
+                        action_status="read_only"
+                    )
                     return {"response": reply, "conversation_id": cid, "tool_called": None, "action_status": "read_only"}
 
             day_req = self._extract_day_number(msg_text, target_trip)
@@ -1916,8 +2445,8 @@ class TravelTrackAIAgent:
                 "action_status": "read_only"
             }
 
-        # 14. Check wishlist (e.g. "Check my wishlist", "What's in my wishlist?")
-        if "wishlist" in msg_low:
+        # 14. Check wishlist (e.g. "Check my wishlist", "What's in my wishlist?", "show wishlist")
+        if any(w in msg_low for w in ["wishlist", "wishkist", "wish list", "bucket list"]):
             wl_res = self.tools.get_wishlist(user_id)
             items = wl_res.get("items", [])
             if not items:

@@ -632,7 +632,7 @@ async def chat_with_agent(
         logger.info(
             f"[AI_CHAT_OUT] conv_id='{req.conversation_id}' | "
             f"tool_called='{result.get('tool_called')}' | "
-            f"places_count={len(result.get('places', []))} | "
+            f"places_count={len(result.get('places') or [])} | "
             f"response_snippet='{result.get('response', '')[:100]}...'"
         )
 

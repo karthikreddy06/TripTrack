@@ -375,5 +375,282 @@ def run_ai_agent_tests():
     print("=" * 60)
 
 
+def run_10_exact_regression_tests():
+    print("\n" + "=" * 60)
+    print("RUNNING 10 EXACT REAL CHATBOT REGRESSION TESTS")
+    print("=" * 60)
+
+    client = TestClient(app, raise_server_exceptions=False)
+    u_id = "507f1f77bcf86cd799439099"
+    token = create_access_token(u_id)
+
+    # Clean up collections
+    trips_collection.delete_many({"user_id": u_id})
+    itineraries_collection.delete_many({"user_id": u_id})
+    expenses_collection.delete_many({"user_id": u_id})
+    wishlist_collection.delete_many({"user_id": u_id})
+    chat_conversations_collection.delete_many({"user_id": u_id})
+
+    # Seed 2 trips for multi-trip testing: Kyoto and Hyderabad
+    kyoto_res = trips_collection.insert_one({
+        "user_id": u_id,
+        "destination": "Kyoto",
+        "title": "Autumn in Kyoto",
+        "start_date": "2026-11-10",
+        "end_date": "2026-11-18",
+        "budget": 45000.0,
+        "travelers": 2,
+        "status": "planned"
+    })
+    kyoto_id = str(kyoto_res.inserted_id)
+
+    hyd_res = trips_collection.insert_one({
+        "user_id": u_id,
+        "destination": "Hyderabad",
+        "title": "Hyderabad Gateway",
+        "start_date": "2026-10-01",
+        "end_date": "2026-10-05",
+        "budget": 15000.0,
+        "travelers": 1,
+        "status": "planned"
+    })
+    hyd_id = str(hyd_res.inserted_id)
+
+    # Add an expense to Kyoto
+    expenses_collection.insert_one({
+        "trip_id": kyoto_id,
+        "user_id": u_id,
+        "category": "Food",
+        "amount": 5000.0,
+        "description": "Traditional Kaiseki Dinner",
+        "date": "2026-11-11"
+    })
+
+    # -------------------------------------------------------------
+    # REGRESSION 1:
+    # User: "How much budget do I have left?" -> AI asks which trip
+    # User: "kyoto" -> AI interprets "kyoto" as answer and calls get_budget (Kyoto), NOT search_places("kyoto")
+    # -------------------------------------------------------------
+    print("\n[REGRESSION 1] Testing multi-trip budget clarification: 'How much budget do I have left?' -> 'kyoto'...")
+    conv1 = f"conv_reg1_{uuid.uuid4().hex[:6]}"
+    r1 = client.post(
+        "/ai/chat",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"message": "How much budget do I have left?", "conversation_id": conv1}
+    )
+    assert r1.status_code == 200
+    d1 = r1.json()
+    assert d1["tool_called"] is None, "Did not expect tool called before trip specified"
+    assert "Which trip" in d1["response"] or "which trip" in d1["response"]
+    print("  Turn 1 Pass: AI asked which trip's budget.")
+
+    # Turn 2: User says "kyoto"
+    r1_turn2 = client.post(
+        "/ai/chat",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"message": "kyoto", "conversation_id": conv1}
+    )
+    assert r1_turn2.status_code == 200
+    d1_turn2 = r1_turn2.json()
+    assert d1_turn2["tool_called"] == "get_budget", f"CRITICAL: Expected 'get_budget', got '{d1_turn2['tool_called']}'"
+    assert "Autumn in Kyoto" in d1_turn2["response"] or "Kyoto" in d1_turn2["response"]
+    assert "40,000" in d1_turn2["response"] or "45,000" in d1_turn2["response"]
+    assert len(d1_turn2.get("places", [])) == 0, "Places recommendations must NOT be returned for budget answer!"
+    print("  Turn 2 Pass: AI correctly routed 'kyoto' to get_budget with ZERO place search!")
+
+    # -------------------------------------------------------------
+    # REGRESSION 2:
+    # User: "add to wishkist" (typo)
+    # Expected: Understand this as incomplete wishlist action and ask:
+    # "Sure — which place would you like me to add to your wishlist?"
+    # ZERO tool calls, NO fabrication of places!
+    # -------------------------------------------------------------
+    print("\n[REGRESSION 2] Testing typo 'add to wishkist' with no place specified...")
+    conv2 = f"conv_reg2_{uuid.uuid4().hex[:6]}"
+    r2 = client.post(
+        "/ai/chat",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"message": "add to wishkist", "conversation_id": conv2}
+    )
+    assert r2.status_code == 200
+    d2 = r2.json()
+    assert d2["tool_called"] is None, f"Expected tool_called=None, got '{d2['tool_called']}'"
+    assert "which place" in d2["response"].lower() or "which place or attraction" in d2["response"].lower()
+    assert "kerala" not in d2["response"].lower(), "CRITICAL: Fabricated Kerala place!"
+    assert "name need to add" not in d2["response"].lower(), "CRITICAL: Fabricated place name!"
+    assert len(d2.get("places") or []) == 0
+    print("  [PASS] 'add to wishkist' asked for place without fabrication or search_places call.")
+
+    # -------------------------------------------------------------
+    # REGRESSION 3:
+    # User: "change the date of hyderabad trip"
+    # Expected: Understand as UPDATE request, ask:
+    # "What date would you like to change your Hyderabad trip to?"
+    # Do NOT return generic Explore/search message, ZERO tool calls.
+    # -------------------------------------------------------------
+    print("\n[REGRESSION 3] Testing 'change the date of hyderabad trip' (missing date)...")
+    conv3 = f"conv_reg3_{uuid.uuid4().hex[:6]}"
+    r3 = client.post(
+        "/ai/chat",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"message": "change the date of hyderabad trip", "conversation_id": conv3}
+    )
+    assert r3.status_code == 200
+    d3 = r3.json()
+    assert d3["tool_called"] is None, f"Expected None, got '{d3['tool_called']}'"
+    assert "what date" in d3["response"].lower()
+    assert "hyderabad" in d3["response"].lower()
+    assert len(d3.get("places") or []) == 0
+    print("  [PASS] Correctly asked for new date for Hyderabad trip with ZERO tool calls.")
+
+    # -------------------------------------------------------------
+    # REGRESSION 4:
+    # User: "change the trip date of Hyderabad to November 1st"
+    # Expected: Calls update_trip, sets dates starting 2026-11-01, ZERO search_places calls.
+    # -------------------------------------------------------------
+    print("\n[REGRESSION 4] Testing 'change the trip date of Hyderabad to November 1st'...")
+    conv4 = f"conv_reg4_{uuid.uuid4().hex[:6]}"
+    r4 = client.post(
+        "/ai/chat",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"message": "change the trip date of Hyderabad to November 1st", "conversation_id": conv4}
+    )
+    assert r4.status_code == 200
+    d4 = r4.json()
+    assert d4["tool_called"] == "update_trip", f"Expected 'update_trip', got '{d4['tool_called']}'"
+    assert d4["mutation_occurred"] is True
+    # Verify in database
+    updated_hyd = trips_collection.find_one({"_id": ObjectId(hyd_id)})
+    assert updated_hyd["start_date"] == "2026-11-01", f"Expected start_date 2026-11-01, got {updated_hyd['start_date']}"
+    print(f"  [PASS] Successfully updated Hyderabad trip to {updated_hyd['start_date']} to {updated_hyd['end_date']}!")
+
+    # -------------------------------------------------------------
+    # REGRESSION 5:
+    # User: "find places in mumbai" -> calls search_places for Mumbai
+    # -------------------------------------------------------------
+    print("\n[REGRESSION 5] Testing 'find places in mumbai'...")
+    conv5 = f"conv_reg5_{uuid.uuid4().hex[:6]}"
+    r5 = client.post(
+        "/ai/chat",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"message": "find places in mumbai", "conversation_id": conv5}
+    )
+    assert r5.status_code == 200
+    d5 = r5.json()
+    assert d5["tool_called"] == "search_places", f"Expected 'search_places', got '{d5['tool_called']}'"
+    assert len(d5.get("places", [])) > 0
+    print("  [PASS] Correctly invoked search_places for Mumbai.")
+
+    # -------------------------------------------------------------
+    # REGRESSION 6:
+    # User: "hello" -> normal greeting, ZERO tool calls, NO fabricated places
+    # -------------------------------------------------------------
+    print("\n[REGRESSION 6] Testing 'hello'...")
+    conv6 = f"conv_reg6_{uuid.uuid4().hex[:6]}"
+    r6 = client.post(
+        "/ai/chat",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"message": "hello", "conversation_id": conv6}
+    )
+    assert r6.status_code == 200
+    d6 = r6.json()
+    assert d6["tool_called"] is None
+    assert len(d6.get("places") or []) == 0
+    print("  [PASS] 'hello' returned greeting with ZERO tools.")
+
+    # -------------------------------------------------------------
+    # REGRESSION 7:
+    # Destructive action requires confirmation -> User confirms with "yes"
+    # -------------------------------------------------------------
+    print("\n[REGRESSION 7] Testing destructive action confirmation flow...")
+    conv7 = f"conv_reg7_{uuid.uuid4().hex[:6]}"
+    r7_req = client.post(
+        "/ai/chat",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"message": f"delete trip {kyoto_id}", "conversation_id": conv7}
+    )
+    assert r7_req.status_code == 200
+    d7_req = r7_req.json()
+    assert d7_req["requires_confirmation"] is True
+    # Confirm
+    r7_conf = client.post(
+        "/ai/chat",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"message": "yes", "conversation_id": conv7}
+    )
+    assert r7_conf.status_code == 200
+    d7_conf = r7_conf.json()
+    assert d7_conf["tool_called"] == "delete_trip"
+    assert d7_conf["action_status"] == "executed"
+    assert trips_collection.find_one({"_id": ObjectId(kyoto_id)}) is None
+    print("  [PASS] Destructive confirmation flow executed properly.")
+
+    # -------------------------------------------------------------
+    # REGRESSION 8:
+    # "the second one" after a place search -> resolves the 2nd place
+    # -------------------------------------------------------------
+    print("\n[REGRESSION 8] Testing 'the second one' place resolution...")
+    r8 = client.post(
+        "/ai/chat",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"message": "the second one", "conversation_id": conv5}
+    )
+    assert r8.status_code == 200
+    d8 = r8.json()
+    assert d8["tool_called"] is None
+    second_place = d5["places"][1]["name"]
+    assert second_place.lower() in d8["response"].lower()
+    print(f"  [PASS] 'the second one' resolved to '{second_place}'.")
+
+    # -------------------------------------------------------------
+    # REGRESSION 9:
+    # "add it to Day 3" after selecting place -> calls add_itinerary_activity
+    # -------------------------------------------------------------
+    print("\n[REGRESSION 9] Testing 'add it to Day 3'...")
+    r9 = client.post(
+        "/ai/chat",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"message": "add it to Day 3", "trip_id": hyd_id, "conversation_id": conv5}
+    )
+    assert r9.status_code == 200
+    d9 = r9.json()
+    assert d9["tool_called"] == "add_itinerary_activity"
+    assert d9["mutation_occurred"] is True
+    itin = itineraries_collection.find_one({"trip_id": hyd_id, "day_number": 3})
+    assert itin is not None
+    assert second_place.lower() in itin["title"].lower()
+    print(f"  [PASS] Added '{itin['title']}' to Day 3 of Hyderabad trip!")
+
+    # -------------------------------------------------------------
+    # REGRESSION 10:
+    # Answering wishlist place clarification: "Fushimi Inari" -> adds to wishlist
+    # -------------------------------------------------------------
+    print("\n[REGRESSION 10] Testing answering wishlist clarification...")
+    r10 = client.post(
+        "/ai/chat",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"message": "Fushimi Inari Shrine", "conversation_id": conv2}
+    )
+    assert r10.status_code == 200
+    d10 = r10.json()
+    assert d10["tool_called"] == "add_wishlist"
+    assert d10["mutation_occurred"] is True
+    saved_wl = wishlist_collection.find_one({"user_id": u_id, "name": {"$regex": "Fushimi Inari", "$options": "i"}})
+    assert saved_wl is not None
+    print("  [PASS] Wishlist clarification successfully added place to wishlist.")
+
+    # Clean up
+    trips_collection.delete_many({"user_id": u_id})
+    itineraries_collection.delete_many({"user_id": u_id})
+    expenses_collection.delete_many({"user_id": u_id})
+    wishlist_collection.delete_many({"user_id": u_id})
+    chat_conversations_collection.delete_many({"user_id": u_id})
+
+    print("\n" + "=" * 60)
+    print("ALL 10 EXACT CHATBOT REGRESSION TESTS PASSED PERFECTLY!")
+    print("=" * 60)
+
+
 if __name__ == "__main__":
     run_ai_agent_tests()
+    run_10_exact_regression_tests()
