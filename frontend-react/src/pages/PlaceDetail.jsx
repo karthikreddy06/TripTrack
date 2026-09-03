@@ -22,6 +22,7 @@ import { MapView } from '../components/MapView';
 import { AddToTripModal } from '../components/AddToTripModal';
 import { EditorialCardBanner } from '../components/EditorialCardBanner';
 import { calculateDistanceKm } from '../utils/geo';
+import { getSafeExternalUrl } from '../utils/url';
 
 export const PlaceDetail = () => {
   const { placeId } = useParams();
@@ -303,11 +304,11 @@ export const PlaceDetail = () => {
               </div>
             )}
 
-            {placeData.website && (
+            {getSafeExternalUrl(placeData.website) && (
               <div className="meta-item" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
                 <Globe size={13} />
                 <a
-                  href={placeData.website}
+                  href={getSafeExternalUrl(placeData.website)}
                   target="_blank"
                   rel="noopener noreferrer"
                   style={{ color: 'var(--primary-green)', textDecoration: 'underline' }}
@@ -317,11 +318,11 @@ export const PlaceDetail = () => {
               </div>
             )}
 
-            {placeData.wikipedia_url && (
+            {getSafeExternalUrl(placeData.wikipedia_url) && (
               <div className="meta-item" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
                 <Scroll size={13} />
                 <a
-                  href={placeData.wikipedia_url}
+                  href={getSafeExternalUrl(placeData.wikipedia_url)}
                   target="_blank"
                   rel="noopener noreferrer"
                   style={{ color: 'var(--primary-green)', textDecoration: 'underline' }}
@@ -331,11 +332,11 @@ export const PlaceDetail = () => {
               </div>
             )}
 
-            {placeData.source?.source_url && (
+            {getSafeExternalUrl(placeData.source?.source_url) && (
               <div className="meta-item" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
                 <ExternalLink size={13} />
                 <a
-                  href={placeData.source.source_url}
+                  href={getSafeExternalUrl(placeData.source.source_url)}
                   target="_blank"
                   rel="noopener noreferrer"
                   style={{ color: 'var(--text-secondary)', textDecoration: 'underline' }}

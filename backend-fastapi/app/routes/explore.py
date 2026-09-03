@@ -1,4 +1,7 @@
-import httpx
+import ipaddress
+import logging
+import socket
+import urllib.parse
 from typing import Optional, List
 from fastapi import APIRouter, HTTPException, Query, Response, status
 
@@ -11,7 +14,71 @@ from app.schemas.explore import (
 )
 from app.services.explore.provider import explore_provider
 
+logger = logging.getLogger("traveltrack.explore")
+
 router = APIRouter(prefix="/explore", tags=["Explore & Travel Discovery (OpenStreetMap & Wikimedia)"])
+
+ALLOWED_IMAGE_DOMAINS = [
+    "wikimedia.org",
+    "wikipedia.org",
+    "openstreetmap.org",
+    "w.wiki",
+]
+
+ALLOWED_IMAGE_CONTENT_TYPES = {
+    "image/jpeg",
+    "image/jpg",
+    "image/png",
+    "image/webp",
+    "image/avif",
+    "image/gif",
+}
+
+
+def is_safe_image_proxy_url(target_url: str) -> bool:
+    """
+    Validate that target URL:
+    1. Uses http or https protocol
+    2. Has a hostname matching our allowed domain whitelist
+    3. Resolves strictly to public, non-private, non-loopback IP addresses (SSRF protection)
+    """
+    try:
+        parsed = urllib.parse.urlparse(target_url)
+        if parsed.scheme not in ("http", "https"):
+            return False
+
+        hostname = parsed.hostname
+        if not hostname:
+            return False
+
+        # Domain whitelist check (exact match or proper subdomain)
+        is_domain_allowed = any(
+            hostname == domain or hostname.endswith(f".{domain}")
+            for domain in ALLOWED_IMAGE_DOMAINS
+        )
+        if not is_domain_allowed:
+            logger.warning(f"Blocked image proxy request to unauthorized domain: {hostname}")
+            return False
+
+        # Resolve hostname to verify IP is not in private, loopback, or link-local ranges
+        addr_info = socket.getaddrinfo(hostname, None)
+        for entry in addr_info:
+            ip_str = entry[4][0]
+            ip = ipaddress.ip_address(ip_str)
+            if (
+                ip.is_private
+                or ip.is_loopback
+                or ip.is_link_local
+                or ip.is_reserved
+                or ip.is_multicast
+            ):
+                logger.warning(f"Blocked SSRF attempt resolving {hostname} to private/internal IP: {ip_str}")
+                return False
+
+        return True
+    except Exception as exc:
+        logger.warning(f"Error validating proxy URL '{target_url}': {exc}")
+        return False
 
 
 @router.get("/suggestions", response_model=List[ExploreSuggestionItem])
@@ -33,9 +100,13 @@ async def get_explore_suggestions(
 async def proxy_explore_photo(url: str = Query(..., description="Verified image URL to proxy")):
     """
     Proxy endpoint for Wikimedia / OpenStreetMap verified images to prevent 403 hotlink blocks.
+    Protected against SSRF, internal network scanning, and DNS rebinding attacks.
     """
-    if not url or not (url.startswith("http://") or url.startswith("https://")):
-        raise HTTPException(status_code=400, detail="Invalid image URL")
+    if not url or not is_safe_image_proxy_url(url):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or untrusted image URL"
+        )
 
     headers = {
         "User-Agent": "TravelTrack-Discovery/3.0 (https://triptrack-frontend.onrender.com; info@triptrack.app)",
@@ -44,20 +115,50 @@ async def proxy_explore_photo(url: str = Query(..., description="Verified image 
     }
 
     try:
-        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-            res = await client.get(url, headers=headers)
-            if res.status_code == 200:
-                content_type = res.headers.get("content-type", "image/jpeg")
-                return Response(
-                    content=res.content,
-                    media_type=content_type,
-                    headers={
-                        "Cache-Control": "public, max-age=604800, immutable",
-                        "Access-Control-Allow-Origin": "*"
-                    }
-                )
-    except Exception:
-        pass
+        # Avoid blind redirect following (SSRF redirect protection)
+        async with httpx.AsyncClient(timeout=8.0, follow_redirects=False) as client:
+            current_url = url
+            for _ in range(3):  # Allow at most 3 redirects, each strictly validated
+                res = await client.get(current_url, headers=headers)
+                if res.status_code in (301, 302, 303, 307, 308):
+                    location = res.headers.get("Location")
+                    if not location:
+                        break
+                    # Normalize relative redirect URLs
+                    resolved_location = urllib.parse.urljoin(current_url, location)
+                    if not is_safe_image_proxy_url(resolved_location):
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Redirect to unauthorized location blocked"
+                        )
+                    current_url = resolved_location
+                    continue
+
+                if res.status_code == 200:
+                    raw_content_type = res.headers.get("content-type", "image/jpeg").lower()
+                    media_type = raw_content_type.split(";")[0].strip()
+
+                    # Only serve verified image MIME types
+                    if media_type not in ALLOWED_IMAGE_CONTENT_TYPES:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Invalid image content type"
+                        )
+
+                    return Response(
+                        content=res.content,
+                        media_type=media_type,
+                        headers={
+                            "Cache-Control": "public, max-age=604800, immutable",
+                            "Access-Control-Allow-Origin": "*",
+                            "X-Content-Type-Options": "nosniff"
+                        }
+                    )
+                break
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.debug(f"Image proxy fetch error: {exc}")
 
     raise HTTPException(status_code=404, detail="Photo could not be retrieved")
 

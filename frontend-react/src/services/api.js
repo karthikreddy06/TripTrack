@@ -309,6 +309,27 @@ export const aiAPI = {
     const response = await apiClient.post('/ai/budget-advice', { trip_id: tripId });
     return response.data;
   },
+
+  sendMessage: async ({ message, tripId, conversationId, confirmAction }) => {
+    const payload = {
+      message: message.trim(),
+      trip_id: tripId || null,
+      conversation_id: conversationId || null,
+      confirm_action: confirmAction !== undefined ? confirmAction : null,
+    };
+    const response = await apiClient.post('/ai/chat', payload);
+    return response.data;
+  },
+
+  getChatHistory: async (conversationId) => {
+    const response = await apiClient.get(`/ai/chat/history/${encodeURIComponent(conversationId)}`);
+    return response.data;
+  },
+
+  clearChatHistory: async (conversationId) => {
+    const response = await apiClient.delete(`/ai/chat/history/${encodeURIComponent(conversationId)}`);
+    return response.data;
+  },
 };
 
 // Explore & Travel Discovery API
@@ -411,3 +432,4 @@ export const healthAPI = {
 };
 
 export default apiClient;
+

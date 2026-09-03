@@ -1,3 +1,4 @@
+import logging
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, status
 
@@ -5,6 +6,7 @@ from app.auth import get_current_user
 from app.database.mongodb import trips_collection, itineraries_collection, expenses_collection
 from app.schemas.trip import TripCreate, TripUpdate
 
+logger = logging.getLogger("traveltrack.trips")
 
 router = APIRouter(
     prefix="/trips",
@@ -19,7 +21,7 @@ def create_trip(
 ):
     """
     Create a new trip.
-    The client cannot create a trip for a different user than the authenticated one.
+    Binds the trip strictly to the authenticated user ID (mass assignment prevention).
     """
     if trip.user_id != current_user_id:
         raise HTTPException(
@@ -28,12 +30,15 @@ def create_trip(
         )
 
     trip_data = trip.model_dump()
+    trip_data["user_id"] = current_user_id  # Guarantee server-side user binding
+
     try:
         result = trips_collection.insert_one(trip_data)
     except Exception as exc:
+        logger.error(f"Database insert error creating trip: {exc}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Database insert error: {str(exc)}"
+            detail="Database service temporarily unavailable. Please try again."
         )
 
     return {
@@ -62,9 +67,10 @@ def get_single_trip(
             "user_id": current_user_id
         })
     except Exception as exc:
+        logger.error(f"Database query error fetching trip {trip_id}: {exc}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Database query error: {str(exc)}"
+            detail="Database service temporarily unavailable. Please try again."
         )
 
     if not trip:
@@ -95,9 +101,10 @@ def get_user_trips(
     try:
         trips = list(trips_collection.find({"user_id": current_user_id}))
     except Exception as exc:
+        logger.error(f"Database query error fetching trips for user {current_user_id}: {exc}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Database query error: {str(exc)}"
+            detail="Database service temporarily unavailable. Please try again."
         )
 
     for trip in trips:
@@ -136,9 +143,10 @@ def update_trip(
                 "user_id": current_user_id
             })
         except Exception as exc:
+            logger.error(f"Database query error checking trip {trip_id}: {exc}")
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"Database query error: {str(exc)}"
+                detail="Database service temporarily unavailable. Please try again."
             )
 
         if not existing:
@@ -156,9 +164,10 @@ def update_trip(
             {"$set": update_data}
         )
     except Exception as exc:
+        logger.error(f"Database update error on trip {trip_id}: {exc}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Database update error: {str(exc)}"
+            detail="Unable to update trip at this time."
         )
 
     if result.matched_count == 0:
@@ -193,9 +202,10 @@ def delete_trip(
             "user_id": current_user_id
         })
     except Exception as exc:
+        logger.error(f"Database delete error on trip {trip_id}: {exc}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Database delete error: {str(exc)}"
+            detail="Unable to delete trip at this time."
         )
 
     if result.deleted_count == 0:
@@ -208,8 +218,8 @@ def delete_trip(
     try:
         itineraries_collection.delete_many({"trip_id": trip_id})
         expenses_collection.delete_many({"trip_id": trip_id})
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning(f"Error during cascade cleanup for trip {trip_id}: {exc}")
 
     return {
         "message": "Trip deleted successfully"

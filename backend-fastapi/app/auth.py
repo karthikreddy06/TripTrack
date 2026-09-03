@@ -16,6 +16,12 @@ try:
 except ImportError:
     pass
 
+import logging
+
+logger = logging.getLogger("traveltrack.auth")
+
+DEFAULT_DEV_SECRET = "default_traveltrack_jwt_secret_key_change_in_production"
+
 def get_jwt_secret_key() -> str:
     key = (
         os.getenv("JWT_SECRET_KEY")
@@ -27,7 +33,17 @@ def get_jwt_secret_key() -> str:
     if (key.startswith('"') and key.endswith('"')) or (key.startswith("'") and key.endswith("'")):
         key = key[1:-1].strip()
 
-    return key or "default_traveltrack_jwt_secret_key_change_in_production"
+    is_prod = os.getenv("ENVIRONMENT", "").lower() in ["production", "prod"] or os.getenv("RENDER") is not None
+    if not key:
+        if is_prod:
+            raise RuntimeError("CRITICAL SECURITY ERROR: JWT_SECRET_KEY environment variable is required in production!")
+        logger.warning("SECURITY WARNING: Using fallback development JWT secret key. Set JWT_SECRET_KEY in production.")
+        return DEFAULT_DEV_SECRET
+
+    if len(key) < 32:
+        logger.warning("SECURITY WARNING: JWT_SECRET_KEY is shorter than 32 characters, which provides weak entropy.")
+
+    return key
 
 
 SECRET_KEY = get_jwt_secret_key()

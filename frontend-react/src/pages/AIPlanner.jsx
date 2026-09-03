@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import {
   Sparkles,
@@ -11,12 +11,18 @@ import {
   ArrowLeft,
   BookmarkPlus,
   Navigation,
-  X
+  X,
+  Send,
+  Trash2,
+  AlertTriangle,
+  RefreshCw,
+  Layers
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { aiAPI, tripsAPI, itineraryAPI, extractErrorMessage } from '../services/api';
 import { Alert } from '../components/Alert';
+import { SafeImage } from '../components/SafeImage';
 import { formatDistance } from '../utils/geo';
 
 const INTEREST_OPTIONS = [
@@ -40,6 +46,9 @@ const STYLE_OPTIONS = [
   'Fast-paced / Highlights',
   'Family Friendly'
 ];
+
+let plannerMsgCounter = 0;
+const getPlannerMsgId = (prefix) => `${prefix}_${++plannerMsgCounter}`;
 
 export const AIPlanner = () => {
   const { user } = useAuth();
@@ -67,6 +76,122 @@ export const AIPlanner = () => {
   const [generatedPlan, setGeneratedPlan] = useState(null);
   const [savingTrip, setSavingTrip] = useState(false);
   const [activeDayIndex, setActiveDayIndex] = useState(0);
+
+  // Tab & Agent Chat States
+  const [activeTab, setActiveTab] = useState('agent'); // 'agent' | 'generator'
+  const [chatMessages, setMessages] = useState([]);
+  const [chatInput, setChatInput] = useState('');
+  const [chatLoading, setChatLoading] = useState(false);
+  const [conversationId, setConversationId] = useState(() => {
+    return localStorage.getItem('traveltrack_chat_cid') || `conv_${Date.now().toString(36)}`;
+  });
+  const [userTrips, setUserTrips] = useState([]);
+  const [selectedTripId, setSelectedTripId] = useState('');
+  const chatEndRef = useRef(null);
+
+  useEffect(() => {
+    localStorage.setItem('traveltrack_chat_cid', conversationId);
+  }, [conversationId]);
+
+  useEffect(() => {
+    const fetchUserTrips = async () => {
+      try {
+        const res = await tripsAPI.getTrips();
+        const trips = res.trips || [];
+        setUserTrips(trips);
+        if (trips.length > 0 && !selectedTripId) {
+          setSelectedTripId(trips[0]._id || trips[0].trip_id);
+        }
+      } catch {
+        // Non-fatal
+      }
+    };
+    fetchUserTrips();
+  }, [selectedTripId]);
+
+  useEffect(() => {
+    if (activeTab === 'agent') {
+      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [chatMessages, activeTab]);
+
+  const handleSendChatMessage = async (textToSend = null, confirmActionVal = null) => {
+    const text = (textToSend !== null ? textToSend : chatInput).trim();
+    if (!text && confirmActionVal === null) return;
+
+    const userMsg = {
+      id: getPlannerMsgId('u'),
+      role: 'user',
+      content: text || (confirmActionVal ? 'Confirm Action' : 'Cancel Action'),
+      timestamp: new Date().toISOString(),
+    };
+
+    setMessages((prev) => [...prev, userMsg]);
+    if (textToSend === null) setChatInput('');
+    setChatLoading(true);
+
+    try {
+      const res = await aiAPI.sendMessage({
+        message: text || (confirmActionVal ? 'confirm' : 'cancel'),
+        tripId: selectedTripId || undefined,
+        conversationId,
+        confirmAction: confirmActionVal !== null ? confirmActionVal : undefined,
+      });
+
+      const aiMsg = {
+        id: getPlannerMsgId('a'),
+        role: 'assistant',
+        content: res.response,
+        timestamp: new Date().toISOString(),
+        tool_called: res.tool_called,
+        tool_result: res.tool_result,
+        pending_action: res.pending_action,
+        action_status: res.action_status,
+        places: res.places,
+      };
+
+      setMessages((prev) => [...prev, aiMsg]);
+
+      if (res.mutation_occurred) {
+        window.dispatchEvent(
+          new CustomEvent('traveltrack-data-updated', {
+            detail: {
+              entity: res.affected_entity,
+              tripId: selectedTripId,
+            },
+          })
+        );
+        showSuccess('TravelTrack updated successfully.');
+      }
+    } catch (err) {
+      const errDetail = extractErrorMessage(err);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `err_${Date.now()}`,
+          role: 'assistant',
+          content: `❌ I encountered an error: ${errDetail}`,
+          timestamp: new Date().toISOString(),
+          action_status: 'failed',
+        },
+      ]);
+      showError(errDetail);
+    } finally {
+      setChatLoading(false);
+    }
+  };
+
+  const handleClearChatSession = async () => {
+    try {
+      await aiAPI.clearChatHistory(conversationId);
+      setMessages([]);
+      const newCid = `conv_${Date.now().toString(36)}`;
+      setConversationId(newCid);
+      showSuccess('Conversation cleared.');
+    } catch {
+      setMessages([]);
+    }
+  };
 
   const toggleInterest = (interest) => {
     setFormData((prev) => {
@@ -213,26 +338,441 @@ export const AIPlanner = () => {
       <div className="dashboard-header">
         <div className="dashboard-title-group">
           <div className="editorial-mark">
-            <i></i> 05 / GROUNDED AI TRAVEL PLANNER
+            <i></i> 05 / GROUNDED AI TRAVEL PLANNER & AGENT
           </div>
           <h1>
             Intelligent journeys, <br />
             <em>grounded in real places.</em>
           </h1>
           <p className="welcome-subtitle">
-            Curates day-by-day itineraries analyzing real OpenStreetMap sights, wishlists, and geographic distances to minimize cross-city transit.
+            Interact with your real context-aware AI travel agent to manage trips, itineraries, budgets, and explore places worldwide.
           </p>
         </div>
       </div>
 
-      {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
+      {/* Mode Tabs */}
+      <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.75rem', flexWrap: 'wrap' }}>
+        <button
+          type="button"
+          onClick={() => setActiveTab('agent')}
+          className={`btn ${activeTab === 'agent' ? 'btn-primary' : 'btn-secondary'}`}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.65rem 1.25rem', borderRadius: '10px' }}
+        >
+          <Sparkles size={16} />
+          <span>AI Travel Agent (Chat & Actions)</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('generator')}
+          className={`btn ${activeTab === 'generator' ? 'btn-primary' : 'btn-secondary'}`}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.65rem 1.25rem', borderRadius: '10px' }}
+        >
+          <Layers size={16} />
+          <span>Structured Itinerary Generator</span>
+        </button>
+      </div>
 
-      <div className="ai-planner-grid">
-        {/* Left Form Panel */}
-        <div className="card ai-form-card">
-          <div className="form-header" style={{ marginBottom: '1.5rem' }}>
-            <div className="editorial-mark"><i></i> PARAMETERS</div>
-            <h3 style={{ fontSize: '1.5rem' }}>Trip Preferences</h3>
+      {activeTab === 'agent' ? (
+        <div
+          className="card"
+          style={{
+            padding: 0,
+            overflow: 'hidden',
+            minHeight: '680px',
+            display: 'flex',
+            flexDirection: 'column',
+            border: '1px solid var(--border-soft)',
+            borderRadius: 'var(--radius-lg, 16px)',
+            backgroundColor: 'var(--bg-card, #FFFFFF)'
+          }}
+        >
+          {/* Agent Console Header */}
+          <div
+            style={{
+              padding: '1.15rem 1.5rem',
+              borderBottom: '1px solid var(--border-soft)',
+              backgroundColor: 'var(--bg-main, #FAF7F2)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: '0.75rem'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <div
+                style={{
+                  width: '36px',
+                  height: '36px',
+                  borderRadius: '10px',
+                  backgroundColor: 'rgba(95, 155, 104, 0.15)',
+                  color: 'var(--primary-green)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >
+                <Sparkles size={18} />
+              </div>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--text-primary)' }}>
+                  TravelTrack Context-Aware Agent
+                </div>
+                <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                  Connected to your trips, itineraries, expenses, and OpenStreetMap Explore
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              {userTrips.length > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem' }}>
+                  <span style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>Active Trip Context:</span>
+                  <select
+                    value={selectedTripId}
+                    onChange={(e) => setSelectedTripId(e.target.value)}
+                    style={{
+                      padding: '0.35rem 0.65rem',
+                      borderRadius: '8px',
+                      border: '1px solid var(--border-soft)',
+                      backgroundColor: 'var(--bg-card)',
+                      fontSize: '0.82rem',
+                      color: 'var(--text-primary)',
+                      maxWidth: '240px'
+                    }}
+                  >
+                    <option value="">All Trips / General</option>
+                    {userTrips.map((t) => (
+                      <option key={t._id || t.trip_id} value={t._id || t.trip_id}>
+                        {t.title} ({t.destination})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={handleClearChatSession}
+                title="Clear conversation history"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', padding: '0.4rem 0.75rem' }}
+              >
+                <Trash2 size={13} />
+                <span>Clear</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Quick Action Suggestion Chips */}
+          <div
+            style={{
+              padding: '0.75rem 1.5rem',
+              borderBottom: '1px solid var(--border-soft)',
+              backgroundColor: 'rgba(0,0,0,0.015)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              overflowX: 'auto',
+              whiteSpace: 'nowrap'
+            }}
+          >
+            <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Quick Suggestions:
+            </span>
+            {[
+              { label: '💰 Check my budget', text: 'How much budget do I have left?' },
+              { label: '📍 Find places in Hyderabad', text: 'Find top attractions in Hyderabad' },
+              { label: '📅 What am I doing on Day 1?', text: 'What am I doing on Day 1?' },
+              { label: '🧾 Add ₹1,200 for dinner', text: 'Add an expense of ₹1,200 for dinner' },
+              { label: '✨ Check my wishlist', text: 'Check my wishlist' },
+              { label: '🧳 Read my trips', text: 'Read my trips' }
+            ].map((chip, idx) => (
+              <button
+                key={idx}
+                type="button"
+                onClick={() => handleSendChatMessage(chip.text)}
+                style={{
+                  padding: '0.35rem 0.75rem',
+                  borderRadius: '999px',
+                  border: '1px solid var(--border-soft)',
+                  backgroundColor: 'var(--bg-card)',
+                  color: 'var(--text-primary)',
+                  fontSize: '0.78rem',
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                  flexShrink: 0
+                }}
+              >
+                {chip.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Chat Messages Stream */}
+          <div
+            style={{
+              flex: 1,
+              overflowY: 'auto',
+              padding: '1.75rem',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '1.25rem',
+              maxHeight: '560px'
+            }}
+          >
+            {chatMessages.length === 0 ? (
+              <div style={{ textAlign: 'center', margin: 'auto 0', padding: '2rem 1rem', maxWidth: '580px', alignSelf: 'center' }}>
+                <div
+                  style={{
+                    width: '56px',
+                    height: '56px',
+                    borderRadius: '50%',
+                    backgroundColor: 'rgba(95, 155, 104, 0.12)',
+                    color: 'var(--primary-green)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    margin: '0 auto 1rem'
+                  }}
+                >
+                  <Sparkles size={28} />
+                </div>
+                <h3 style={{ fontSize: '1.35rem', fontWeight: 700, marginBottom: '0.6rem', color: 'var(--text-primary)' }}>
+                  Ready to assist your journeys
+                </h3>
+                <p style={{ fontSize: '0.92rem', color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: '1.5rem' }}>
+                  I can check your real budgets, inspect itineraries, discover authentic OpenStreetMap places, add activities, log expenses, and update trips.
+                </p>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.75rem', textAlign: 'left' }}>
+                  <div style={{ padding: '0.85rem', borderRadius: '10px', backgroundColor: 'var(--bg-main)', border: '1px solid var(--border-soft)' }}>
+                    <div style={{ fontWeight: 600, fontSize: '0.84rem', color: 'var(--primary-green)', marginBottom: '0.25rem' }}>
+                      📍 Explore & Schedule
+                    </div>
+                    <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                      "Find sights in Tokyo" followed by "Add the first one to Day 2".
+                    </div>
+                  </div>
+                  <div style={{ padding: '0.85rem', borderRadius: '10px', backgroundColor: 'var(--bg-main)', border: '1px solid var(--border-soft)' }}>
+                    <div style={{ fontWeight: 600, fontSize: '0.84rem', color: 'var(--primary-green)', marginBottom: '0.25rem' }}>
+                      💰 Budgets & Expenses
+                    </div>
+                    <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                      "How much do I have left?" or "Add an expense of ₹500 for taxi".
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              chatMessages.map((m) => (
+                <div
+                  key={m.id}
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: m.role === 'user' ? 'flex-end' : 'flex-start',
+                    width: '100%'
+                  }}
+                >
+                  <div
+                    style={{
+                      maxWidth: '82%',
+                      padding: '1rem 1.25rem',
+                      borderRadius: m.role === 'user' ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
+                      backgroundColor: m.role === 'user' ? 'var(--primary-green, #5F9B68)' : 'var(--bg-main, #FAF7F2)',
+                      color: m.role === 'user' ? '#FFFFFF' : 'var(--text-primary, #2A2A2A)',
+                      border: m.role === 'user' ? 'none' : '1px solid var(--border-soft, #D8CFBE)',
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.03)',
+                      fontSize: '0.92rem',
+                      lineHeight: 1.6,
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word'
+                    }}
+                  >
+                    {/* Tool Badge */}
+                    {m.tool_called && (
+                      <div
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.35rem',
+                          fontSize: '0.75rem',
+                          padding: '0.2rem 0.5rem',
+                          borderRadius: '4px',
+                          backgroundColor: 'rgba(95, 155, 104, 0.15)',
+                          color: 'var(--primary-green)',
+                          fontWeight: 600,
+                          marginBottom: '0.6rem'
+                        }}
+                      >
+                        <CheckCircle2 size={12} />
+                        <span>Action: {m.tool_called}</span>
+                      </div>
+                    )}
+
+                    {m.content}
+
+                    {/* Places recommendation cards */}
+                    {m.places && m.places.length > 0 && (
+                      <div style={{ marginTop: '1rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.75rem' }}>
+                        {m.places.slice(0, 4).map((p, pIdx) => (
+                          <div
+                            key={p.id || pIdx}
+                            style={{
+                              padding: '0.65rem',
+                              borderRadius: '10px',
+                              backgroundColor: 'var(--bg-card)',
+                              border: '1px solid var(--border-soft)',
+                              display: 'flex',
+                              gap: '0.65rem'
+                            }}
+                          >
+                            {p.image_url ? (
+                              <div style={{ width: '56px', height: '56px', borderRadius: '8px', overflow: 'hidden', flexShrink: 0 }}>
+                                <SafeImage src={p.image_url} alt={p.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                              </div>
+                            ) : (
+                              <div style={{ width: '56px', height: '56px', borderRadius: '8px', backgroundColor: 'rgba(95,155,104,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--primary-green)', flexShrink: 0 }}>
+                                <MapPin size={20} />
+                              </div>
+                            )}
+                            <div style={{ overflow: 'hidden' }}>
+                              <div style={{ fontWeight: 600, fontSize: '0.84rem', color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                {p.name}
+                              </div>
+                              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                {p.category || 'Sight'} • {p.address || p.location || ''}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Confirmation Action Card */}
+                    {m.pending_action && (
+                      <div
+                        style={{
+                          marginTop: '1rem',
+                          padding: '0.85rem 1rem',
+                          borderRadius: '10px',
+                          backgroundColor: 'rgba(239, 68, 68, 0.08)',
+                          border: '1px solid rgba(239, 68, 68, 0.25)'
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', color: '#B91C1C', fontWeight: 600, fontSize: '0.86rem', marginBottom: '0.6rem' }}>
+                          <AlertTriangle size={15} />
+                          <span>Action Confirmation Required</span>
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.6rem' }}>
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-sm"
+                            style={{ backgroundColor: '#B91C1C', borderColor: '#B91C1C', padding: '0.4rem 0.85rem', fontSize: '0.82rem' }}
+                            onClick={() => handleSendChatMessage(null, true)}
+                            disabled={chatLoading}
+                          >
+                            Confirm Action
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            style={{ padding: '0.4rem 0.85rem', fontSize: '0.82rem' }}
+                            onClick={() => handleSendChatMessage(null, false)}
+                            disabled={chatLoading}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+
+            {chatLoading && (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  padding: '0.85rem 1.25rem',
+                  borderRadius: '18px 18px 18px 4px',
+                  backgroundColor: 'var(--bg-main)',
+                  border: '1px solid var(--border-soft)',
+                  color: 'var(--text-secondary)',
+                  fontSize: '0.86rem',
+                  width: 'fit-content'
+                }}
+              >
+                <RefreshCw size={14} className="spinner" />
+                <span>AI is reading context and executing tool...</span>
+              </div>
+            )}
+
+            <div ref={chatEndRef} />
+          </div>
+
+          {/* Chat Input Console */}
+          <div
+            style={{
+              padding: '1rem 1.5rem',
+              borderTop: '1px solid var(--border-soft)',
+              backgroundColor: 'var(--bg-main, #FAF7F2)',
+              display: 'flex',
+              gap: '0.75rem',
+              alignItems: 'center'
+            }}
+          >
+            <input
+              type="text"
+              className="input-field"
+              placeholder="Ask AI or instruct an action (e.g. 'Add Charminar to Day 2', 'How much budget left?')..."
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSendChatMessage();
+                }
+              }}
+              disabled={chatLoading}
+              style={{
+                flex: 1,
+                padding: '0.75rem 1rem',
+                fontSize: '0.9rem',
+                borderRadius: '10px',
+                border: '1px solid var(--border-soft)',
+                backgroundColor: 'var(--bg-card)'
+              }}
+            />
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => handleSendChatMessage()}
+              disabled={chatLoading || !chatInput.trim()}
+              style={{
+                padding: '0.75rem 1.25rem',
+                borderRadius: '10px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.45rem'
+              }}
+            >
+              <Send size={15} />
+              <span>Send</span>
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="ai-planner-grid">
+          {/* Left Form Panel */}
+          <div className="card ai-form-card">
+            <div className="form-header" style={{ marginBottom: '1.5rem' }}>
+              <div className="editorial-mark"><i></i> PARAMETERS</div>
+              <h3 style={{ fontSize: '1.5rem' }}>Trip Preferences</h3>
           </div>
 
           <form onSubmit={handleGenerate}>
@@ -614,6 +1154,7 @@ export const AIPlanner = () => {
           )}
         </div>
       </div>
+      )}
     </div>
   );
 };

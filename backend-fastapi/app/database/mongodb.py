@@ -60,6 +60,7 @@ trips_collection = db["trips"]
 itineraries_collection = db["itineraries"]
 expenses_collection = db["expenses"]
 wishlist_collection = db["wishlists"]
+chat_conversations_collection = db["chat_conversations"]
 
 def init_db_indexes():
     """Ensure essential indexes exist for performance and uniqueness."""
@@ -71,6 +72,8 @@ def init_db_indexes():
         expenses_collection.create_index("user_id")
         wishlist_collection.create_index([("user_id", 1), ("place_id", 1)], unique=True)
         wishlist_collection.create_index("user_id")
+        chat_conversations_collection.create_index([("user_id", 1), ("conversation_id", 1)], unique=True)
+        chat_conversations_collection.create_index("updated_at")
     except Exception as e:
         # Avoid blocking startup if connection times out initially
         pass

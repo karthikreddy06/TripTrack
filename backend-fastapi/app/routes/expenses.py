@@ -1,9 +1,12 @@
+import logging
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.auth import get_current_user
 from app.database.mongodb import trips_collection, expenses_collection
 from app.schemas.expense import ExpenseCreate, ExpenseUpdate
+
+logger = logging.getLogger("traveltrack.expenses")
 
 router = APIRouter(
     prefix="/expenses",
@@ -22,9 +25,10 @@ def verify_trip_ownership(trip_id: str, user_id: str):
     try:
         trip = trips_collection.find_one({"_id": ObjectId(trip_id), "user_id": user_id})
     except Exception as exc:
+        logger.error(f"Database query error verifying trip ownership for trip {trip_id}: {exc}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Database query error: {str(exc)}"
+            detail="Database service temporarily unavailable. Please try again."
         )
 
     if not trip:
@@ -51,9 +55,10 @@ def create_expense(
     try:
         result = expenses_collection.insert_one(expense_data)
     except Exception as exc:
+        logger.error(f"Database insert error logging expense: {exc}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Database insert error: {str(exc)}"
+            detail="Unable to log expense at this time."
         )
 
     return {
@@ -78,9 +83,10 @@ def get_trip_expenses(
             expenses_collection.find({"trip_id": trip_id}).sort("date", -1)
         )
     except Exception as exc:
+        logger.error(f"Database query error fetching expenses for trip {trip_id}: {exc}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Database query error: {str(exc)}"
+            detail="Database service temporarily unavailable. Please try again."
         )
 
     total_spent = 0.0
@@ -139,9 +145,10 @@ def get_user_expense_summary(
             expenses_collection.find({"user_id": current_user_id}).sort("date", -1)
         )
     except Exception as exc:
+        logger.error(f"Database query error fetching expense summary for user {current_user_id}: {exc}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Database query error: {str(exc)}"
+            detail="Database service temporarily unavailable. Please try again."
         )
 
     total_spent = sum(float(exp.get("amount", 0.0)) for exp in expenses)
@@ -190,9 +197,10 @@ def update_expense(
     try:
         existing = expenses_collection.find_one({"_id": ObjectId(expense_id)})
     except Exception as exc:
+        logger.error(f"Database query error checking expense {expense_id}: {exc}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Database query error: {str(exc)}"
+            detail="Database service temporarily unavailable. Please try again."
         )
 
     if not existing:
@@ -213,9 +221,10 @@ def update_expense(
             {"$set": update_data}
         )
     except Exception as exc:
+        logger.error(f"Database update error on expense {expense_id}: {exc}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Database update error: {str(exc)}"
+            detail="Unable to update expense at this time."
         )
 
     return {"message": "Expense updated successfully"}
@@ -238,9 +247,10 @@ def delete_expense(
     try:
         existing = expenses_collection.find_one({"_id": ObjectId(expense_id)})
     except Exception as exc:
+        logger.error(f"Database query error checking expense {expense_id}: {exc}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Database query error: {str(exc)}"
+            detail="Database service temporarily unavailable. Please try again."
         )
 
     if not existing:
@@ -254,9 +264,10 @@ def delete_expense(
     try:
         expenses_collection.delete_one({"_id": ObjectId(expense_id)})
     except Exception as exc:
+        logger.error(f"Database delete error on expense {expense_id}: {exc}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Database delete error: {str(exc)}"
+            detail="Unable to delete expense at this time."
         )
 
     return {"message": "Expense deleted successfully"}

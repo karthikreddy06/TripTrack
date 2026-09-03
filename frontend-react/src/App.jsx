@@ -17,6 +17,7 @@ import { DestinationDetail } from './pages/DestinationDetail';
 import { PlaceDetail } from './pages/PlaceDetail';
 import { Wishlist } from './pages/Wishlist';
 import { NotFound } from './pages/NotFound';
+import { AIAssistantDrawer } from './components/AIAssistantDrawer';
 import './styles/components.css';
 
 // Public route helper that redirects authenticated users to dashboard
@@ -162,6 +163,7 @@ export default function App() {
           {/* 404 Catch-all */}
           <Route path="*" element={<NotFound />} />
         </Routes>
+        <AIAssistantDrawer />
       </div>
     </ToastProvider>
   );

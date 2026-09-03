@@ -33,6 +33,56 @@ app = FastAPI(
     version="1.0.0"
 )
 
+import logging
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import Response
+
+logger = logging.getLogger("traveltrack.main")
+
+# Max request body size: 2MB
+MAX_REQUEST_BODY_SIZE = 2 * 1024 * 1024
+
+
+class SecurityHeadersAndLimitsMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        # 1. Enforce request body size limit via Content-Length if present
+        content_length = request.headers.get("content-length")
+        if content_length:
+            try:
+                if int(content_length) > MAX_REQUEST_BODY_SIZE:
+                    return JSONResponse(
+                        status_code=413,
+                        content={"detail": "Request payload exceeds maximum allowed limit (2MB)"}
+                    )
+            except ValueError:
+                return JSONResponse(
+                    status_code=400,
+                    content={"detail": "Invalid Content-Length header"}
+                )
+
+        response = await call_next(request)
+
+        # 2. Add standard defensive security headers
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Content-Security-Policy"] = "default-src 'self'; frame-ancestors 'none';"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "geolocation=(self), camera=(), microphone=()"
+
+        # HSTS (Strict-Transport-Security) for HTTPS environments
+        if request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https":
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+
+        # 3. Dynamic API responses should not be stored by shared intermediary caches
+        if "Cache-Control" not in response.headers and not request.url.path.startswith("/explore/photo"):
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+
+        return response
+
+
+app.add_middleware(SecurityHeadersAndLimitsMiddleware)
+
 # Configure CORS for React frontend (Vite & Create React App dev servers, Render production)
 origins = [
     "http://localhost:3000",
@@ -52,14 +102,27 @@ if frontend_url_env:
         if cleaned_url and cleaned_url not in origins:
             origins.append(cleaned_url)
 
+# Apply strictly scoped CORS middleware (No wildcard subdomain regex)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_origin_regex=r"^https:\/\/.*\.onrender\.com$",
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"]
 )
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """
+    Global defensive exception handler: logs the full trace internally
+    while returning a sanitized, unrevealing message to clients.
+    """
+    logger.error(f"Unhandled server error on {request.method} {request.url.path}: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "An unexpected server error occurred. Please try again later."}
+    )
 
 # Register API routers for root and /api prefixes
 app.include_router(users_router)

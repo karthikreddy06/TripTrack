@@ -1,4 +1,4 @@
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -68,3 +68,48 @@ class AIBudgetAdviceResponse(BaseModel):
     analysis: str
     saving_tips: List[str]
     category_allocations: Dict[str, str]
+
+
+class PendingAction(BaseModel):
+    action_id: str
+    tool: str
+    description: str
+    args: Dict[str, Any] = Field(default_factory=dict)
+
+
+class AIChatRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=1500, description="User's natural language input")
+    trip_id: Optional[str] = Field(default=None, description="Optional active trip ID context")
+    conversation_id: Optional[str] = Field(default=None, description="Session conversation ID")
+    confirm_action: Optional[bool] = Field(default=None, description="Confirmation flag for pending destructive action (true/false)")
+
+
+class AIChatResponse(BaseModel):
+    response: str
+    conversation_id: str
+    tool_called: Optional[str] = None
+    tool_result: Optional[Any] = None
+    pending_action: Optional[PendingAction] = None
+    requires_confirmation: bool = False
+    action_status: Optional[str] = None  # "executed", "pending_confirmation", "cancelled", "failed", "read_only"
+    mutation_occurred: bool = False
+    affected_entity: Optional[str] = None  # "trip", "itinerary", "expense", "wishlist"
+    places: Optional[List[Dict[str, Any]]] = None
+
+
+class ChatMessageItem(BaseModel):
+    id: str
+    role: str  # "user" | "assistant"
+    content: str
+    timestamp: str
+    tool_called: Optional[str] = None
+    tool_result: Optional[Any] = None
+    action_status: Optional[str] = None
+    pending_action: Optional[PendingAction] = None
+    places: Optional[List[Dict[str, Any]]] = None
+
+
+class ChatHistoryResponse(BaseModel):
+    conversation_id: str
+    messages: List[ChatMessageItem] = Field(default_factory=list)
+

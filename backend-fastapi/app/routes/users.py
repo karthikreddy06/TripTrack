@@ -1,6 +1,10 @@
+import time
+import logging
+from collections import defaultdict
 from bson import ObjectId
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 import bcrypt
+from pymongo.errors import DuplicateKeyError
 
 from app.schemas.user import UserCreate
 from app.schemas.login import UserLogin
@@ -8,28 +12,60 @@ from app.schemas.profile import ProfileUpdate, PasswordChange
 from app.database.mongodb import users_collection, trips_collection
 from app.auth import create_access_token, get_current_user
 
+logger = logging.getLogger("traveltrack.users")
 
 router = APIRouter(
     prefix="/users",
     tags=["Users"]
 )
 
+# In-memory sliding window rate limiter stores
+_LOGIN_ATTEMPTS = defaultdict(list)
+_REGISTER_ATTEMPTS = defaultdict(list)
+
+
+def _get_client_ip(request: Request) -> str:
+    """Extract client IP safely from request headers or socket."""
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "127.0.0.1"
+
+
+def _enforce_rate_limit(store: dict, key: str, max_attempts: int, window_seconds: int):
+    """Enforce a sliding-window rate limit, raising 429 when exceeded."""
+    now = time.time()
+    store[key] = [t for t in store[key] if now - t < window_seconds]
+    if len(store[key]) >= max_attempts:
+        retry_after = max(1, int(window_seconds - (now - store[key][0])))
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Too many requests. Please try again in {retry_after} seconds.",
+            headers={"Retry-After": str(retry_after)}
+        )
+    store[key].append(now)
+
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
-def register_user(user: UserCreate):
+def register_user(user: UserCreate, request: Request):
     """
     Register a new user with hashed password.
-    Checks for duplicate emails and returns the newly created user_id.
+    Protected by sliding-window rate limiting, race condition duplicate key handling,
+    and sanitized error responses.
     """
+    client_ip = _get_client_ip(request)
+    _enforce_rate_limit(_REGISTER_ATTEMPTS, client_ip, max_attempts=10, window_seconds=60)
+
     try:
         # Check if email already exists
         existing_user = users_collection.find_one({
             "email": user.email.lower()
         })
     except Exception as exc:
+        logger.error(f"Database query error during user registration: {exc}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Database connection error: {str(exc)}"
+            detail="Database service temporarily unavailable. Please try again."
         )
 
     if existing_user:
@@ -38,7 +74,7 @@ def register_user(user: UserCreate):
             detail="User with this email already exists"
         )
 
-    # Hash password using bcrypt
+    # Hash password using bcrypt (max 72 bytes strictly enforced by schema)
     hashed_password = bcrypt.hashpw(
         user.password.encode("utf-8"),
         bcrypt.gensalt()
@@ -56,10 +92,17 @@ def register_user(user: UserCreate):
 
     try:
         result = users_collection.insert_one(user_data)
+    except DuplicateKeyError:
+        # Prevent race condition duplicate insertion
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="User with this email already exists"
+        )
     except Exception as exc:
+        logger.error(f"Database insert error during user registration: {exc}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Database insert error: {str(exc)}"
+            detail="Unable to complete user registration at this time."
         )
 
     return {
@@ -69,19 +112,25 @@ def register_user(user: UserCreate):
 
 
 @router.post("/login", status_code=status.HTTP_200_OK)
-def login_user(user: UserLogin):
+def login_user(user: UserLogin, request: Request):
     """
     Authenticate user credentials and issue a JWT access token.
+    Protected by brute-force rate limiting and sanitized timing.
     """
+    client_ip = _get_client_ip(request)
+    rate_key = f"{client_ip}:{user.email.lower()}"
+    _enforce_rate_limit(_LOGIN_ATTEMPTS, rate_key, max_attempts=15, window_seconds=300)
+
     try:
         # Find user by email
         existing_user = users_collection.find_one({
             "email": user.email.lower()
         })
     except Exception as exc:
+        logger.error(f"Database query error during user login: {exc}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Database connection error: {str(exc)}"
+            detail="Database service temporarily unavailable. Please try again."
         )
 
     if not existing_user:
@@ -137,9 +186,10 @@ def get_user_profile(current_user_id: str = Depends(get_current_user)):
             {"password": 0}  # Exclude password hash
         )
     except Exception as exc:
+        logger.error(f"Database query error fetching user profile: {exc}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Database query error: {str(exc)}"
+            detail="Database service temporarily unavailable. Please try again."
         )
 
     if not user:
@@ -177,9 +227,10 @@ def update_user_profile(
             {"$set": update_data}
         )
     except Exception as exc:
+        logger.error(f"Database update error updating user profile: {exc}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Database update error: {str(exc)}"
+            detail="Unable to update profile at this time."
         )
 
     if result.matched_count == 0:
@@ -208,9 +259,10 @@ def change_password(
     try:
         user = users_collection.find_one({"_id": ObjectId(current_user_id)})
     except Exception as exc:
+        logger.error(f"Database query error checking password: {exc}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Database query error: {str(exc)}"
+            detail="Database service temporarily unavailable. Please try again."
         )
 
     if not user:
@@ -234,7 +286,7 @@ def change_password(
             detail="Current password does not match"
         )
 
-    # Hash new password
+    # Hash new password (max 72 bytes strictly enforced)
     hashed_new = bcrypt.hashpw(
         pwd_data.new_password.encode("utf-8"),
         bcrypt.gensalt()
@@ -246,9 +298,10 @@ def change_password(
             {"$set": {"password": hashed_new}}
         )
     except Exception as exc:
+        logger.error(f"Database update error setting new password: {exc}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Database update error: {str(exc)}"
+            detail="Unable to update password at this time."
         )
 
     return {"message": "Password changed successfully"}

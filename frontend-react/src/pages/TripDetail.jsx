@@ -102,6 +102,16 @@ export const TripDetail = () => {
     fetchTripData();
   }, [fetchTripData]);
 
+  useEffect(() => {
+    const handleDataUpdate = (e) => {
+      if (!e.detail?.tripId || e.detail.tripId === id) {
+        fetchTripData();
+      }
+    };
+    window.addEventListener('traveltrack-data-updated', handleDataUpdate);
+    return () => window.removeEventListener('traveltrack-data-updated', handleDataUpdate);
+  }, [fetchTripData, id]);
+
   // Handle Trip Deletion
   const handleConfirmDeleteTrip = async () => {
     try {

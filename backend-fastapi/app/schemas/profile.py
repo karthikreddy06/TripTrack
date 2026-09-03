@@ -17,5 +17,5 @@ class ProfileUpdate(BaseModel):
 
 
 class PasswordChange(BaseModel):
-    current_password: str = Field(..., min_length=1, description="Current account password")
-    new_password: str = Field(..., min_length=6, description="New password with at least 6 characters")
+    current_password: str = Field(..., min_length=1, max_length=72, description="Current account password")
+    new_password: str = Field(..., min_length=6, max_length=72, description="New password with 6 to 72 characters")

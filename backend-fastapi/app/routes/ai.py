@@ -1,6 +1,7 @@
 import json
 import math
 import os
+import logging
 import urllib.request
 import urllib.error
 from datetime import date, timedelta
@@ -8,16 +9,23 @@ from typing import List, Dict, Any, Optional, Set
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, status
 
+logger = logging.getLogger("traveltrack.ai")
+
 from app.auth import get_current_user
-from app.database.mongodb import trips_collection, expenses_collection, wishlist_collection
+from app.database.mongodb import trips_collection, expenses_collection, wishlist_collection, chat_conversations_collection
 from app.services.explore.provider import explore_provider
+from app.services.ai_agent import ai_agent_service
 from app.schemas.ai import (
     AITripPlanRequest,
     AITripPlanResponse,
     AIBudgetAdviceRequest,
     AIBudgetAdviceResponse,
     AIDayPlan,
-    AITripActivity
+    AITripActivity,
+    AIChatRequest,
+    AIChatResponse,
+    ChatHistoryResponse,
+    ChatMessageItem
 )
 
 router = APIRouter(
@@ -582,3 +590,83 @@ def get_budget_advice(
         saving_tips=saving_tips,
         category_allocations=category_allocations
     )
+
+
+# =====================================================================
+# REAL CONTEXT-AWARE AI TRAVEL AGENT CHAT ENDPOINTS
+# =====================================================================
+
+@router.post("/chat", response_model=AIChatResponse, status_code=status.HTTP_200_OK)
+async def chat_with_agent(
+    req: AIChatRequest,
+    current_user_id: str = Depends(get_current_user)
+):
+    """
+    Interact with the context-aware AI travel agent.
+    Performs dynamic tool calling, reads/writes real TravelTrack user data,
+    resolves conversational references, and manages confirmations for destructive actions.
+    """
+    try:
+        result = await ai_agent_service.process_chat(
+            user_id=current_user_id,
+            message=req.message,
+            explicit_trip_id=req.trip_id,
+            conversation_id=req.conversation_id,
+            confirm_action=req.confirm_action
+        )
+        return AIChatResponse(**result)
+    except Exception as exc:
+        logger.error(f"Error in chat_with_agent: {exc}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="The AI Travel Agent encountered an issue processing your request. Please try again."
+        )
+
+
+@router.get("/chat/history/{conversation_id}", response_model=ChatHistoryResponse, status_code=status.HTTP_200_OK)
+def get_chat_history(
+    conversation_id: str,
+    current_user_id: str = Depends(get_current_user)
+):
+    """
+    Retrieve stored conversation history for the authenticated user and conversation.
+    """
+    doc = chat_conversations_collection.find_one({
+        "user_id": current_user_id,
+        "conversation_id": conversation_id
+    })
+    if not doc:
+        return ChatHistoryResponse(conversation_id=conversation_id, messages=[])
+
+    raw_msgs = doc.get("messages", [])
+    valid_msgs = []
+    for m in raw_msgs:
+        valid_msgs.append(ChatMessageItem(
+            id=m.get("id", "msg"),
+            role=m.get("role", "user"),
+            content=m.get("content", ""),
+            timestamp=m.get("timestamp", ""),
+            tool_called=m.get("tool_called"),
+            tool_result=m.get("tool_result"),
+            action_status=m.get("action_status"),
+            pending_action=m.get("pending_action"),
+            places=m.get("places")
+        ))
+
+    return ChatHistoryResponse(conversation_id=conversation_id, messages=valid_msgs)
+
+
+@router.delete("/chat/history/{conversation_id}", status_code=status.HTTP_200_OK)
+def clear_chat_history(
+    conversation_id: str,
+    current_user_id: str = Depends(get_current_user)
+):
+    """
+    Clear a conversation history session for the authenticated user.
+    """
+    chat_conversations_collection.delete_one({
+        "user_id": current_user_id,
+        "conversation_id": conversation_id
+    })
+    return {"message": "Chat session cleared successfully."}
+

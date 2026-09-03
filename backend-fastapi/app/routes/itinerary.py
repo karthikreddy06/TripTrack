@@ -1,9 +1,12 @@
+import logging
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.auth import get_current_user
 from app.database.mongodb import trips_collection, itineraries_collection
 from app.schemas.itinerary import ActivityCreate, ActivityUpdate
+
+logger = logging.getLogger("traveltrack.itinerary")
 
 router = APIRouter(
     prefix="/itinerary",
@@ -22,9 +25,10 @@ def verify_trip_ownership(trip_id: str, user_id: str):
     try:
         trip = trips_collection.find_one({"_id": ObjectId(trip_id), "user_id": user_id})
     except Exception as exc:
+        logger.error(f"Database query error checking trip ownership for trip {trip_id}: {exc}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Database query error: {str(exc)}"
+            detail="Database service temporarily unavailable. Please try again."
         )
 
     if not trip:
@@ -70,9 +74,10 @@ def create_activity(
     try:
         result = itineraries_collection.insert_one(activity_data)
     except Exception as exc:
+        logger.error(f"Database insert error creating activity: {exc}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Database insert error: {str(exc)}"
+            detail="Unable to save activity at this time."
         )
 
     return {
@@ -101,9 +106,10 @@ def get_trip_activities(
             itineraries_collection.find({"trip_id": trip_id}).sort([("date", 1), ("time", 1)])
         )
     except Exception as exc:
+        logger.error(f"Database query error fetching activities for trip {trip_id}: {exc}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Database query error: {str(exc)}"
+            detail="Database service temporarily unavailable. Please try again."
         )
 
     for act in activities:
@@ -130,9 +136,10 @@ def update_activity(
     try:
         existing = itineraries_collection.find_one({"_id": ObjectId(activity_id)})
     except Exception as exc:
+        logger.error(f"Database query error checking activity {activity_id}: {exc}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Database query error: {str(exc)}"
+            detail="Database service temporarily unavailable. Please try again."
         )
 
     if not existing:
@@ -154,9 +161,10 @@ def update_activity(
             {"$set": update_data}
         )
     except Exception as exc:
+        logger.error(f"Database update error on activity {activity_id}: {exc}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Database update error: {str(exc)}"
+            detail="Unable to update activity at this time."
         )
 
     return {"message": "Activity updated successfully"}
@@ -179,9 +187,10 @@ def delete_activity(
     try:
         existing = itineraries_collection.find_one({"_id": ObjectId(activity_id)})
     except Exception as exc:
+        logger.error(f"Database query error checking activity {activity_id}: {exc}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Database query error: {str(exc)}"
+            detail="Database service temporarily unavailable. Please try again."
         )
 
     if not existing:
@@ -196,9 +205,10 @@ def delete_activity(
     try:
         itineraries_collection.delete_one({"_id": ObjectId(activity_id)})
     except Exception as exc:
+        logger.error(f"Database delete error on activity {activity_id}: {exc}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Database delete error: {str(exc)}"
+            detail="Unable to delete activity at this time."
         )
 
     return {"message": "Activity deleted successfully"}
