@@ -607,6 +607,20 @@ async def chat_with_agent(
     resolves conversational references, and manages confirmations for destructive actions.
     """
     try:
+        # Development logging: inspect input state & history
+        conv_doc = chat_conversations_collection.find_one({
+            "user_id": current_user_id,
+            "conversation_id": req.conversation_id
+        })
+        history_count = len(conv_doc.get("messages", [])) if conv_doc else 0
+
+        logger.info(
+            f"[AI_CHAT_IN] user_id={current_user_id[:6]}... | "
+            f"conv_id='{req.conversation_id}' | "
+            f"history_msgs={history_count} | "
+            f"msg='{req.message}'"
+        )
+
         result = await ai_agent_service.process_chat(
             user_id=current_user_id,
             message=req.message,
@@ -614,6 +628,14 @@ async def chat_with_agent(
             conversation_id=req.conversation_id,
             confirm_action=req.confirm_action
         )
+
+        logger.info(
+            f"[AI_CHAT_OUT] conv_id='{req.conversation_id}' | "
+            f"tool_called='{result.get('tool_called')}' | "
+            f"places_count={len(result.get('places', []))} | "
+            f"response_snippet='{result.get('response', '')[:100]}...'"
+        )
+
         return AIChatResponse(**result)
     except Exception as exc:
         logger.error(f"Error in chat_with_agent: {exc}", exc_info=True)

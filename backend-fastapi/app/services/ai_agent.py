@@ -895,14 +895,14 @@ class TravelTrackAIAgent:
         self,
         user_message: str,
         greeting_type: str,
-        active_trip: Optional[Dict[str, Any]] = None
+        active_trip: Optional[Dict[str, Any]] = None,
+        is_new_conversation: bool = False
     ) -> str:
         """
         Dynamically crafts an authentic, friendly travel-assistant response for greetings and casual chat.
-        Never uses static one-line canned strings; dynamically factors in time of day, active trip context,
-        and tone.
+        Never repeats the initial welcome greeting for subsequent turns or unrecognized queries.
         """
-        t_low = user_message.lower()
+        t_low = user_message.lower().strip()
 
         if greeting_type == "thanks":
             if active_trip:
@@ -922,7 +922,7 @@ class TravelTrackAIAgent:
                 "I am your **TravelTrack AI Agent**. I help you plan trips, organize day-by-day itineraries, track budgets and expenses, "
                 "and explore authentic sights and restaurants worldwide using live OpenStreetMap data.\n\n"
                 "Here are things you can ask me:\n"
-                "• *'Find top attractions in Kolkata'*\n"
+                "• *'Find top attractions in Mumbai'*\n"
                 "• *'Find restaurants near Eiffel Tower'*\n"
                 "• *'What is my budget?'*\n"
                 "• *'What am I doing tomorrow?'*\n"
@@ -930,32 +930,53 @@ class TravelTrackAIAgent:
                 "• *'Check my wishlist'*"
             )
 
-        # General Greetings
-        hour = datetime.now().hour
-        tod = "Good morning" if 5 <= hour < 12 else ("Good afternoon" if 12 <= hour < 18 else "Good evening")
+        # Handle Greetings
+        if greeting_type == "greeting":
+            hour = datetime.now().hour
+            tod = "Good morning" if 5 <= hour < 12 else ("Good afternoon" if 12 <= hour < 18 else "Good evening")
 
-        if "good morning" in t_low:
-            salutation = "Good morning!"
-        elif "good evening" in t_low:
-            salutation = "Good evening!"
-        elif "good afternoon" in t_low:
-            salutation = "Good afternoon!"
-        elif "hey" in t_low:
-            salutation = "Hey there! 👋"
-        elif "hello" in t_low:
-            salutation = "Hello! 👋"
-        else:
-            salutation = f"{tod}! 👋"
+            if "good morning" in t_low:
+                salutation = "Good morning!"
+            elif "good evening" in t_low:
+                salutation = "Good evening!"
+            elif "good afternoon" in t_low:
+                salutation = "Good afternoon!"
+            elif "hey" in t_low:
+                salutation = "Hey there! 👋"
+            elif "hello" in t_low:
+                salutation = "Hello! 👋"
+            else:
+                salutation = f"{tod}! 👋"
 
+            if is_new_conversation:
+                if active_trip:
+                    return (
+                        f"{salutation} I'm your TravelTrack AI Agent. How can I help with your trip to **{active_trip.get('destination')}** today? "
+                        "You can ask about your schedule, check your remaining budget, or find sights to explore."
+                    )
+                return (
+                    f"{salutation} I'm your TravelTrack AI Agent. What travel adventure can I help you plan or check today? "
+                    "You can ask me to explore attractions in any city, inspect your budget, check your itinerary, or manage your wishlist."
+                )
+            else:
+                # In an ongoing conversation, greeting must NOT repeat the full initial onboarding greeting
+                if active_trip:
+                    return f"{salutation} How can I assist with your journey to **{active_trip.get('destination')}** right now?"
+                return f"{salutation} How can I assist with your travel planning right now?"
+
+        # General non-greeting / unmatched message fallback
+        # MUST NEVER return the welcome greeting!
         if active_trip:
             return (
-                f"{salutation} I'm your TravelTrack AI Agent. How can I help with your trip to **{active_trip.get('destination')}** today? "
-                "You can ask about your schedule, check your remaining budget, or find sights to explore."
+                f"Regarding '**{user_message}**' for your trip to **{active_trip.get('destination')}**: "
+                "I can search verified sights and restaurants, schedule itinerary activities to specific days, or track your expenses. "
+                "What would you like me to do?"
             )
 
         return (
-            f"{salutation} I'm your TravelTrack AI Agent. What travel adventure can I help you plan or check today? "
-            "You can ask me to explore attractions in any city, inspect your budget, check your itinerary, or manage your wishlist."
+            f"I received your message: '**{user_message}**'. "
+            "You can ask me to search verified attractions or restaurants in any destination (e.g. *'Find places in Mumbai'* or *'Restaurants near Eiffel Tower'*), "
+            "review your trip itinerary, check your budget, or manage your wishlist."
         )
 
     async def _handle_conversational_chat(
@@ -963,7 +984,8 @@ class TravelTrackAIAgent:
         user_message: str,
         greeting_type: str,
         chat_history: List[Dict[str, Any]],
-        active_trip: Optional[Dict[str, Any]] = None
+        active_trip: Optional[Dict[str, Any]] = None,
+        is_new_conversation: bool = False
     ) -> str:
         """
         Routes chat message to real LLM (Gemini / OpenAI) or dynamic contextual generator.
@@ -979,7 +1001,8 @@ class TravelTrackAIAgent:
         return self._generate_natural_chat_response(
             user_message=user_message,
             greeting_type=greeting_type,
-            active_trip=active_trip
+            active_trip=active_trip,
+            is_new_conversation=is_new_conversation
         )
 
     def _detect_place_search(self, msg_text: str) -> Optional[Dict[str, Any]]:
@@ -989,28 +1012,20 @@ class TravelTrackAIAgent:
         """
         t_low = msg_text.lower().strip()
 
-        # Exclude other intents: trips, budget, expenses, itinerary, wishlist, confirmation
-        if any(p in t_low for p in ["my trip", "my trips", "delete trip", "create trip", "create a trip", "plan trip",
-                                   "my budget", "check budget", "check my budget", "budget left", "what's my budget", "what is my budget",
-                                   "my expense", "my expenses", "add expense", "delete expense", "log expense",
-                                   "my itinerary", "on day", "doing tomorrow", "schedule on", "add activity",
-                                   "my wishlist", "add to wishlist", "remove from wishlist",
-                                   "add the first", "add the second", "add that place"]):
-            return None
-
-        SEARCH_PATTERNS = [
-            r"\b(?:find|search|explore|discover|recommend|look\s+for|show(?:\s+me)?|suggest)\b",
-            r"\b(?:places\s+to\s+(?:visit|see|go)|things\s+to\s+do|sights|attractions|monuments|spots|famous\s+places)\b",
-            r"\b(?:what\s+should\s+i\s+(?:visit|see)|what\s+to\s+(?:see|visit|do))\b",
-            r"\b(?:hotels?|resorts?|places\s+to\s+stay|hostels?|lodging)\b",
-            r"\b(?:restaurants?|cafes?|food|dining|places\s+to\s+eat)\b"
+        # 1. Exclude other operational intents: trips, budget, expenses, itinerary, wishlist, confirmation
+        EXCLUSIONS = [
+            "my trip", "my trips", "delete trip", "create trip", "create a trip", "plan trip",
+            "my budget", "check budget", "check my budget", "budget left", "what's my budget", "what is my budget",
+            "how much budget", "how much do i have left", "how much left", "spending",
+            "my expense", "my expenses", "add expense", "delete expense", "log expense",
+            "my itinerary", "on day", "doing tomorrow", "what am i doing", "schedule on", "add activity",
+            "my wishlist", "add to wishlist", "remove from wishlist",
+            "add the first", "add the second", "add that place"
         ]
-
-        has_search_verb = any(re.search(pat, t_low) for pat in SEARCH_PATTERNS)
-        if not has_search_verb:
+        if any(p in t_low for p in EXCLUSIONS):
             return None
 
-        # Determine category
+        # 2. Determine category
         cat = "all"
         if any(w in t_low for w in ["hotel", "stay", "resort", "lodging", "hostel", "accommodation"]):
             cat = "hotels"
@@ -1019,8 +1034,8 @@ class TravelTrackAIAgent:
         elif any(w in t_low for w in ["attraction", "sight", "museum", "historic", "monument", "places to visit", "things to do", "famous places"]):
             cat = "attractions"
 
-        # Check for nearby landmark: e.g. "near Eiffel Tower", "around Colosseum", "close to Charminar"
-        m_near = re.search(r"\b(?:near|around|close\s+to)\s+([^?.!,]+)", msg_text, re.IGNORECASE)
+        # 3. Check for nearby landmark: e.g. "near Eiffel Tower", "around Colosseum", "close to Charminar", "nearby Big Ben"
+        m_near = re.search(r"\b(?:near|around|close\s+to|nearby)\s+([^?.!,]+)", msg_text, re.IGNORECASE)
         if m_near:
             target = m_near.group(1).strip()
             target = re.sub(r"\b(please|thanks|thank you)\b", "", target, flags=re.IGNORECASE).strip()
@@ -1031,11 +1046,14 @@ class TravelTrackAIAgent:
                     "category": cat
                 }
 
-        # Check for destination: e.g. "in Kolkata", "to visit in Paris", "for Tokyo"
-        m_in = re.search(r"\b(?:in|at|for|to\s+visit\s+in|of)\s+([^?.!,]+)", msg_text, re.IGNORECASE)
+        # 4. Check for destination preposition: e.g. "in Mumbai", "places in Kolkata", "to visit in Paris", "hotels for Tokyo"
+        m_in = re.search(r"\b(?:in|at|to\s+visit\s+in)\s+([^?.!,]+)", msg_text, re.IGNORECASE)
+        if not m_in:
+            m_in = re.search(r"\b(?:places|sights|attractions|recommendations|guide|hotels?|restaurants?)\s+(?:for|of)\s+([^?.!,]+)", msg_text, re.IGNORECASE)
         if m_in:
             target = m_in.group(1).strip()
             target = re.sub(r"\b(please|thanks|thank you)\b", "", target, flags=re.IGNORECASE).strip()
+            target = re.sub(r"\b(places|attractions|sights|hotels|restaurants|things to do)\b", "", target, flags=re.IGNORECASE).strip()
             if len(target) >= 2:
                 return {
                     "is_nearby": False,
@@ -1043,8 +1061,8 @@ class TravelTrackAIAgent:
                     "category": cat
                 }
 
-        # Direct search target after search verb (e.g. "explore Paris", "search Kyoto")
-        m_direct = re.search(r"\b(?:explore|search|visit)\s+([a-zA-Z\s]{2,30})$", msg_text, re.IGNORECASE)
+        # 5. Check direct verbs: e.g. "explore Paris", "search Kyoto", "visit Rome"
+        m_direct = re.search(r"\b(?:explore|search|visit|discover)\s+([a-zA-Z\s]{2,30})$", msg_text, re.IGNORECASE)
         if m_direct:
             cand = m_direct.group(1).strip()
             if cand.lower() not in ["places", "attractions", "hotels", "restaurants", "sights", "more", "trip", "itinerary"]:
@@ -1054,12 +1072,50 @@ class TravelTrackAIAgent:
                     "category": cat
                 }
 
-        # User asked to search places, but NO location was specified (e.g. "Find places", "Find restaurants")
-        return {
-            "is_nearby": False,
-            "target": None,
-            "category": cat
-        }
+        # 6. Check generic search verbs or nouns WITHOUT location:
+        # e.g. "find places", "get places", "show me places", "find attractions", "recommend hotels"
+        SEARCH_TRIGGERS = [
+            r"\b(?:find|search|explore|discover|recommend|look\s+for|show(?:\s+me)?|give(?:\s+me)?|get(?:\s+me)?|tell(?:\s+me)?|list|suggest)\b",
+            r"\b(?:places|sights|attractions|things\s+to\s+do|spots|hotels?|restaurants?)\b"
+        ]
+        has_search_trigger = any(re.search(pat, t_low) for pat in SEARCH_TRIGGERS)
+        if has_search_trigger:
+            clean_search = re.sub(
+                r"\b(?:find|search|explore|discover|recommend|look\s+for|show(?:\s+me)?|give(?:\s+me)?|get(?:\s+me)?|tell(?:\s+me)?|list|suggest|all\s+the|the|all|places|sights|attractions|things\s+to\s+do|spots|hotels?|restaurants?|food|in|at|for|to\s+visit|me|please)\b",
+                "",
+                msg_text,
+                flags=re.IGNORECASE
+            ).strip()
+            clean_search = re.sub(r"[^\w\s]", "", clean_search).strip()
+            if len(clean_search) >= 2 and not clean_search.isdigit():
+                return {
+                    "is_nearby": False,
+                    "target": clean_search,
+                    "category": cat
+                }
+            # Search intent was detected, but NO location was provided (e.g. "Find places", "Show hotels")
+            return {
+                "is_nearby": False,
+                "target": None,
+                "category": cat
+            }
+
+        # 7. Single or short location query: e.g. "mumbai", "tokyo", "paris", "new york", "mumbai places"
+        words = t_low.split()
+        if 1 <= len(words) <= 3 and len(t_low) >= 3 and not t_low.isdigit():
+            clean_word = re.sub(r"[^\w\s]", "", t_low).strip()
+            NON_LOCATION_WORDS = [
+                "yes", "no", "ok", "okay", "sure", "cancel", "stop", "help", "who", "what", "why", "when", "how",
+                "test", "demo", "sample", "trip", "itinerary", "budget", "expense", "wishlist"
+            ]
+            if clean_word not in NON_LOCATION_WORDS:
+                return {
+                    "is_nearby": False,
+                    "target": clean_word,
+                    "category": cat
+                }
+
+        return None
 
     def _extract_amount(self, text: str) -> Optional[float]:
         """Extract monetary amounts (e.g. ₹1,200, Rs 500, $45, 1200)."""
@@ -1247,11 +1303,14 @@ class TravelTrackAIAgent:
         # -------------------------------------------------------------
         is_greeting, g_type = self._is_greeting_or_casual(msg_text)
         if is_greeting:
+            chat_history = session_doc.get("messages", [])
+            is_new = len(chat_history) == 0
             reply = await self._handle_conversational_chat(
                 user_message=msg_text,
                 greeting_type=g_type,
-                chat_history=session_doc.get("messages", []),
-                active_trip=active_trip
+                chat_history=chat_history,
+                active_trip=active_trip,
+                is_new_conversation=is_new
             )
             self.memory.save_turn(
                 user_id=user_id,
@@ -2022,7 +2081,8 @@ class TravelTrackAIAgent:
             user_message=msg_text,
             greeting_type="general",
             chat_history=session_doc.get("messages", []),
-            active_trip=active_trip
+            active_trip=active_trip,
+            is_new_conversation=False
         )
         self.memory.save_turn(user_id, cid, msg_text, reply, {}, action_status="read_only")
         return {

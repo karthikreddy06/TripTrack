@@ -26,7 +26,9 @@ export const AIAssistantDrawer = () => {
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState('');
   const [loading, setLoading] = useState(false);
-  const [conversationId, setConversationId] = useState('conv_agent_session');
+  const [conversationId, setConversationId] = useState(() => {
+    return localStorage.getItem('traveltrack_chat_cid') || 'conv_agent_session';
+  });
   const [trips, setTrips] = useState([]);
   const [activeTripId, setActiveTripId] = useState('');
   const messagesEndRef = useRef(null);
@@ -36,6 +38,33 @@ export const AIAssistantDrawer = () => {
   useEffect(() => {
     localStorage.setItem('traveltrack_chat_cid', conversationId);
   }, [conversationId]);
+
+  // Restore conversation history when opening drawer if messages state is empty
+  useEffect(() => {
+    if (!isOpen || !isAuthenticated || !conversationId) return;
+    const fetchHistory = async () => {
+      try {
+        const historyData = await aiAPI.getChatHistory(conversationId);
+        if (historyData?.messages?.length > 0) {
+          const formatted = historyData.messages.map((m, idx) => ({
+            id: `hist_${idx}_${Date.now()}`,
+            role: m.role,
+            content: m.content,
+            timestamp: m.timestamp || new Date().toISOString(),
+            tool_called: m.tool_called,
+            places: m.places || [],
+            action_status: m.action_status,
+          }));
+          setMessages(formatted);
+        }
+      } catch {
+        // Non-fatal
+      }
+    };
+    if (messages.length === 0) {
+      fetchHistory();
+    }
+  }, [isOpen, isAuthenticated, conversationId, messages.length]);
 
   // Load user trips for context selector
   useEffect(() => {

@@ -87,6 +87,57 @@ def run_ai_agent_tests():
     print("  [PASS] 'heyy' returned natural greeting with ZERO tool calls and NO assumed city.")
 
     # -------------------------------------------------------------
+    # CASE 1A (REGRESSION): "get me all the places in mumbai" -> search_places for Mumbai
+    # -------------------------------------------------------------
+    print("\n[CASE 1A] Testing 'get me all the places in mumbai'...")
+    res1a = client.post(
+        "/ai/chat",
+        headers={"Authorization": f"Bearer {t1_token}"},
+        json={"message": "get me all the places in mumbai", "conversation_id": f"conv_mumbai_{uuid.uuid4().hex[:6]}"}
+    )
+    assert res1a.status_code == 200
+    d1a = res1a.json()
+    assert d1a["tool_called"] == "search_places", f"Expected 'search_places', got '{d1a['tool_called']}'"
+    assert len(d1a.get("places", [])) > 0, "Expected places for Mumbai"
+    assert "Good morning" not in d1a["response"], "CRITICAL BUG: Initial greeting returned instead of Mumbai places!"
+    assert "Good afternoon" not in d1a["response"], "CRITICAL BUG: Initial greeting returned instead of Mumbai places!"
+    print(f"  [PASS] 'get me all the places in mumbai' called search_places for Mumbai (found {len(d1a['places'])} places, first: '{d1a['places'][0]['name']}').")
+
+    # -------------------------------------------------------------
+    # CASE 1B (REGRESSION): "mumbai" -> search_places for Mumbai
+    # -------------------------------------------------------------
+    print("\n[CASE 1B] Testing single word 'mumbai'...")
+    res1b = client.post(
+        "/ai/chat",
+        headers={"Authorization": f"Bearer {t1_token}"},
+        json={"message": "mumbai", "conversation_id": f"conv_mumbai2_{uuid.uuid4().hex[:6]}"}
+    )
+    assert res1b.status_code == 200
+    d1b = res1b.json()
+    assert d1b["tool_called"] == "search_places", f"Expected 'search_places', got '{d1b['tool_called']}'"
+    assert len(d1b.get("places", [])) > 0
+    assert "Good morning" not in d1b["response"]
+    assert "Good afternoon" not in d1b["response"]
+    print("  [PASS] 'mumbai' called search_places with Mumbai directly.")
+
+    # -------------------------------------------------------------
+    # CASE 1C (REGRESSION): Unmatched general message -> NO greeting fallback!
+    # -------------------------------------------------------------
+    print("\n[CASE 1C] Testing unmatched general question does not return welcome greeting...")
+    res1c = client.post(
+        "/ai/chat",
+        headers={"Authorization": f"Bearer {t1_token}"},
+        json={"message": "What should I pack for rain?", "conversation_id": f"conv_gen_{uuid.uuid4().hex[:6]}"}
+    )
+    assert res1c.status_code == 200
+    d1c = res1c.json()
+    assert d1c["tool_called"] is None
+    assert "Good morning! 👋 I'm your TravelTrack AI Agent" not in d1c["response"]
+    assert "Good afternoon! 👋 I'm your TravelTrack AI Agent" not in d1c["response"]
+    assert "What should I pack for rain" in d1c["response"]
+    print("  [PASS] General question acknowledged user input without falling back to initial welcome greeting.")
+
+    # -------------------------------------------------------------
     # CASE 2: "hello" -> greeting only, ZERO tool calls
     # -------------------------------------------------------------
     print("\n[CASE 2] Testing 'hello' (pure greeting)...")

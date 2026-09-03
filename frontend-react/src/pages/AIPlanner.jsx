@@ -93,6 +93,33 @@ export const AIPlanner = () => {
     localStorage.setItem('traveltrack_chat_cid', conversationId);
   }, [conversationId]);
 
+  // Restore conversation history on mount if chatMessages is empty
+  useEffect(() => {
+    if (!conversationId) return;
+    const fetchHistory = async () => {
+      try {
+        const historyData = await aiAPI.getChatHistory(conversationId);
+        if (historyData?.messages?.length > 0) {
+          const formatted = historyData.messages.map((m, idx) => ({
+            id: `hist_p_${idx}_${Date.now()}`,
+            role: m.role,
+            content: m.content,
+            timestamp: m.timestamp || new Date().toISOString(),
+            tool_called: m.tool_called,
+            places: m.places || [],
+            action_status: m.action_status,
+          }));
+          setMessages(formatted);
+        }
+      } catch {
+        // Non-fatal
+      }
+    };
+    if (chatMessages.length === 0) {
+      fetchHistory();
+    }
+  }, [conversationId, chatMessages.length]);
+
   useEffect(() => {
     const fetchUserTrips = async () => {
       try {
