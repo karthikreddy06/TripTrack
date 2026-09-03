@@ -2606,8 +2606,15 @@ class TravelTrackAIAgent:
 
         # 10. Move activity / Change time (e.g. "Move Golconda Fort from Day 4 to Day 2", "Change the time to 2:00 PM")
         if ("move" in msg_low or "reschedule" in msg_low or "change the time" in msg_low or "change time" in msg_low) and ("day" in msg_low or "time" in msg_low):
-            if not active_trip_id:
+            target_trip = active_trip or self._match_trip_from_text(user_id, msg_text)
+            if not target_trip:
+                all_trips = self.tools.get_user_trips(user_id).get("trips", [])
+                if len(all_trips) == 1:
+                    target_trip = all_trips[0]
+            if not target_trip:
                 return {"response": "Please specify which trip's activity you'd like to reschedule.", "conversation_id": cid}
+            active_trip = target_trip
+            active_trip_id = str(target_trip["_id"])
 
             itin_res = self.tools.get_itinerary(user_id, active_trip_id)
             acts = itin_res.get("activities", [])
@@ -2664,8 +2671,15 @@ class TravelTrackAIAgent:
 
         # 11. Add to itinerary / trip (e.g. "Add Charminar to my trip", "Add this restaurant to Day 3", "Add the first one to Day 2")
         if "add" in msg_low and ("trip" in msg_low or "itinerary" in msg_low or "day" in msg_low or "tomorrow" in msg_low):
-            if not active_trip_id:
+            target_trip = active_trip or self._match_trip_from_text(user_id, msg_text)
+            if not target_trip:
+                all_trips = self.tools.get_user_trips(user_id).get("trips", [])
+                if len(all_trips) == 1:
+                    target_trip = all_trips[0]
+            if not target_trip:
                 return {"response": "Please create or select a trip first before adding itinerary activities.", "conversation_id": cid}
+            active_trip = target_trip
+            active_trip_id = str(target_trip["_id"])
 
             target_day = self._extract_day_number(msg_text, active_trip)
 
