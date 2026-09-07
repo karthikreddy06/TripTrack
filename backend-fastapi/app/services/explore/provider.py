@@ -371,8 +371,23 @@ class ExploreProvider:
 
             # Discover real places nearby within 6km
             raw_nearby = await self.overpass.discover_places(lat=center_lat, lon=center_lon, category=cat_lower, radius=6000)
-            if not raw_nearby:
-                raw_nearby = await self.nominatim.search_pois_in_area(geo.get("city") or geo["name"], category=cat_lower, limit=12)
+            if not raw_nearby or len(raw_nearby) < 4:
+                existing_ids = {p["id"] for p in raw_nearby}
+                poi_fb, wiki_fb = await asyncio.gather(
+                    self.nominatim.search_pois_in_area(geo.get("city") or geo["name"], category=cat_lower, limit=12),
+                    self.wikimedia.search_places_near_coords(lat=center_lat, lon=center_lon, category=cat_lower, radius=6000, limit=12),
+                    return_exceptions=True
+                )
+                if isinstance(poi_fb, list):
+                    for p in poi_fb:
+                        if p["id"] not in existing_ids:
+                            existing_ids.add(p["id"])
+                            raw_nearby.append(p)
+                if isinstance(wiki_fb, list):
+                    for p in wiki_fb:
+                        if p["id"] not in existing_ids:
+                            existing_ids.add(p["id"])
+                            raw_nearby.append(p)
 
             ranked_nearby = self._rank_and_deduplicate_candidates(
                 raw_places=raw_nearby,
@@ -420,13 +435,24 @@ class ExploreProvider:
             dest_name = geo["name"]
 
             # Discover real places via Overpass
-            raw_places = await self.overpass.discover_places(lat=center_lat, lon=center_lon, category=cat_lower, radius=9000)
+            raw_places = await self.overpass.discover_places(lat=center_lat, lon=center_lon, category=cat_lower, radius=5500)
             if not raw_places or len(raw_places) < 6:
-                poi_fallback = await self.nominatim.search_pois_in_area(dest_name, category=cat_lower, limit=16)
                 existing_ids = {p["id"] for p in raw_places}
-                for p in poi_fallback:
-                    if p["id"] not in existing_ids:
-                        raw_places.append(p)
+                poi_fallback, wiki_fallback = await asyncio.gather(
+                    self.nominatim.search_pois_in_area(dest_name, category=cat_lower, limit=16),
+                    self.wikimedia.search_places_near_coords(lat=center_lat, lon=center_lon, category=cat_lower, radius=8000, limit=20),
+                    return_exceptions=True
+                )
+                if isinstance(poi_fallback, list):
+                    for p in poi_fallback:
+                        if p["id"] not in existing_ids:
+                            existing_ids.add(p["id"])
+                            raw_places.append(p)
+                if isinstance(wiki_fallback, list):
+                    for p in wiki_fallback:
+                        if p["id"] not in existing_ids:
+                            existing_ids.add(p["id"])
+                            raw_places.append(p)
 
             # Apply Multi-Signal Ranking, Quality Filtering, and Deduplication
             ranked_places = self._rank_and_deduplicate_candidates(
@@ -514,9 +540,25 @@ class ExploreProvider:
 
         enriched = existing_places
         if enriched is None:
-            raw_places = await self.overpass.discover_places(lat=geo["lat"], lon=geo["lon"], category="all", radius=9000)
-            if not raw_places:
-                raw_places = await self.nominatim.search_pois_in_area(geo["name"], category="all", limit=16)
+            raw_places = await self.overpass.discover_places(lat=geo["lat"], lon=geo["lon"], category="all", radius=5500)
+            if not raw_places or len(raw_places) < 6:
+                existing_ids = {p["id"] for p in raw_places}
+                poi_fallback, wiki_fallback = await asyncio.gather(
+                    self.nominatim.search_pois_in_area(geo["name"], category="all", limit=16),
+                    self.wikimedia.search_places_near_coords(lat=geo["lat"], lon=geo["lon"], category="all", radius=8000, limit=20),
+                    return_exceptions=True
+                )
+                if isinstance(poi_fallback, list):
+                    for p in poi_fallback:
+                        if p["id"] not in existing_ids:
+                            existing_ids.add(p["id"])
+                            raw_places.append(p)
+                if isinstance(wiki_fallback, list):
+                    for p in wiki_fallback:
+                        if p["id"] not in existing_ids:
+                            existing_ids.add(p["id"])
+                            raw_places.append(p)
+
             ranked = self._rank_and_deduplicate_candidates(raw_places, geo["lat"], geo["lon"], category="all", max_dist_km=28.0)
             enrich_tasks = [self._enrich_place(p, geo["display_name"]) for p in ranked[:16]]
             if enrich_tasks:

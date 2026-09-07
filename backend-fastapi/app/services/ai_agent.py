@@ -659,6 +659,30 @@ class LLMClient:
         t_low = msg_text.lower().strip()
         words = t_low.split()
 
+        cat = "all"
+        if any(w in t_low for w in ["restaurant", "food", "eat", "dining"]): cat = "restaurants"
+        elif any(w in t_low for w in ["cafe", "coffee", "bakery"]): cat = "cafes"
+        elif any(w in t_low for w in ["hotel", "stay", "resort", "hostel"]): cat = "hotels"
+        elif any(w in t_low for w in ["museum", "gallery"]): cat = "museums"
+        elif any(w in t_low for w in ["park", "garden", "beach"]): cat = "parks"
+        elif any(w in t_low for w in ["historic", "monument", "fort", "palace"]): cat = "historic"
+        elif any(w in t_low for w in ["attraction", "sight", "places to visit", "things to do"]): cat = "attractions"
+
+        # Explicit travel and sightseeing inquiries:
+        m_travel = re.search(
+            r"\b(?:what\s+should\s+i\s+visit\s+in|what\s+to\s+see\s+in|what\s+to\s+visit\s+in|what\s+can\s+i\s+do\s+in|"
+            r"places\s+to\s+visit\s+in|things\s+to\s+do\s+in|famous\s+places\s+in|tourist\s+places\s+in|best\s+places\s+in|"
+            r"top\s+places\s+in|top\s+attractions\s+in|attractions\s+in|sights\s+in|where\s+to\s+go\s+in|recommend\s+places\s+in|"
+            r"find\s+places\s+in|search\s+places\s+in|explore\s+places\s+in|explore|visit|sights\s+of)\s+([a-zA-Z\s]{2,25})",
+            msg_text,
+            re.IGNORECASE
+        )
+        if m_travel:
+            cand = re.sub(r"[^\w\s]", "", m_travel.group(1)).strip()
+            cand = re.sub(r"^(?:in|for|around)\s+", "", cand, flags=re.IGNORECASE).strip()
+            if cand and len(cand) >= 2 and not cand.isdigit():
+                return {"target": cand.title(), "category": cat}
+
         # NEVER search places for general knowledge, coding, or cultural questions
         GENERAL_TRIGGERS = [
             "what is", "why is", "tell me about", "teach me", "phrases", "famous for", "known for",
@@ -670,23 +694,13 @@ class LLMClient:
         if any(t in t_low for t in GENERAL_TRIGGERS):
             return None
 
-        cat = "all"
-        if any(w in t_low for w in ["restaurant", "food", "eat", "dining"]): cat = "restaurants"
-        elif any(w in t_low for w in ["cafe", "coffee", "bakery"]): cat = "cafes"
-        elif any(w in t_low for w in ["hotel", "stay", "resort", "hostel"]): cat = "hotels"
-        elif any(w in t_low for w in ["museum", "gallery"]): cat = "museums"
-        elif any(w in t_low for w in ["park", "garden", "beach"]): cat = "parks"
-        elif any(w in t_low for w in ["historic", "monument", "fort", "palace"]): cat = "historic"
-        elif any(w in t_low for w in ["attraction", "sight", "places to visit", "things to do"]): cat = "attractions"
-
-        # Explicit verbs with destination: e.g. "places to visit in Mumbai", "find places in Kolkata"
-        m_in = re.search(r"\b(?:find|get|show|search|explore|list|places\s+to\s+visit\s+in|things\s+to\s+do\s+in|famous\s+places\s+in|tourist\s+places\s+in|best\s+places\s+in)\s+([a-zA-Z\s]{2,25})", msg_text, re.IGNORECASE)
+        # General "find/show/search <city>"
+        m_in = re.search(r"\b(?:find|get|show|search|explore|list)\s+([a-zA-Z\s]{2,25})", msg_text, re.IGNORECASE)
         if m_in:
             cand = re.sub(r"[^\w\s]", "", m_in.group(1)).strip()
-            # Strip noise words like "in "
             cand = re.sub(r"^(?:in|for|around)\s+", "", cand, flags=re.IGNORECASE).strip()
             if cand and len(cand) >= 2 and not cand.isdigit():
-                return {"target": cand, "category": cat}
+                return {"target": cand.title(), "category": cat}
 
         # Single word city queries (e.g. "Mumbai", "Paris", "Kyoto")
         if len(words) == 1 and len(t_low) >= 3 and not t_low.isdigit():

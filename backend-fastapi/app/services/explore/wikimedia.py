@@ -1,6 +1,7 @@
+import re
 import time
 import urllib.parse
-from typing import Dict, Optional, Any
+from typing import Dict, List, Optional, Any
 import httpx
 
 # In-memory cache for Wikimedia verified image and summary results (TTL: 24 hours)
@@ -142,5 +143,99 @@ class WikimediaService:
         }
 
 
+    async def search_places_near_coords(
+        self,
+        lat: float,
+        lon: float,
+        category: str = "all",
+        radius: int = 8000,
+        limit: int = 24
+    ) -> List[Dict[str, Any]]:
+        """
+        Dynamically discover notable cultural landmarks, museums, monuments, parks, and attractions
+        around any geographic coordinates on Earth using Wikipedia Geosearch.
+        """
+        non_landmark_regex = re.compile(
+            r"\b(battle of|siege of|rebellion|massacre|famine|election|treaty of|timeline of|"
+            r"railway station|station\b|subway|metro station|airport|bombing|incident|scandal|"
+            r"highway|motorway|expressway|treaty|history of|demographics of|economy of|geography of|"
+            r"olympics|championship|games\b|cup\b|attack|strikes?|commune|empire|festival|"
+            r"constituency|lok sabha|vidhan sabha|assembly constituency|district\b|division\b|"
+            r"engineering college|medical college|university\b|high school|college of|institute of|"
+            r"consulate|embassy|high commission|fire department|fire station|police department|police station|stock exchange|"
+            r"municipal corporation|ministry of|department of|council\b)\b",
+            re.IGNORECASE
+        )
+
+        def classify_article_title(title: str) -> str:
+            t = title.lower()
+            if any(k in t for k in ["museum", "gallery", "art center", "exhibition", "collection"]):
+                return "museum"
+            if any(k in t for k in ["palace", "castle", "fort", "temple", "shrine", "cathedral", "church", "basilica", "mosque", "tomb", "monument", "memorial", "ruins", "gate"]):
+                return "historic"
+            if any(k in t for k in ["park", "garden", "nature reserve", "botanical", "sanctuary", "forest"]):
+                return "park"
+            if any(k in t for k in ["theatre", "theater", "opera", "zoo", "aquarium", "theme park", "amusement"]):
+                return "activity"
+            if any(k in t for k in ["hotel", "resort", "inn\b"]):
+                return "hotel"
+            if any(k in t for k in ["restaurant", "cafe", "bistro", "bakery"]):
+                return "restaurant"
+            return "attraction"
+
+        url = "https://en.wikipedia.org/w/api.php"
+        params = {
+            "action": "query",
+            "list": "geosearch",
+            "gscoord": f"{lat}|{lon}",
+            "gsradius": min(10000, max(1000, radius)),
+            "gslimit": min(50, limit * 2),
+            "format": "json"
+        }
+
+        results: List[Dict[str, Any]] = []
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout, headers=self.headers) as client:
+                res = await client.get(url, params=params)
+                if res.status_code == 200:
+                    data = res.json()
+                    items = data.get("query", {}).get("geosearch", [])
+                    for it in items:
+                        title = it.get("title", "").strip()
+                        if not title or non_landmark_regex.search(title):
+                            continue
+
+                        cat = classify_article_title(title)
+                        p_lat = float(it.get("lat", 0.0))
+                        p_lon = float(it.get("lon", 0.0))
+                        pageid = it.get("pageid")
+
+                        results.append({
+                            "id": f"wiki_{pageid}",
+                            "place_id": f"wiki_{pageid}",
+                            "provider_id": f"wikipedia/{pageid}",
+                            "name": title,
+                            "category": cat,
+                            "address": title,
+                            "lat": p_lat,
+                            "lon": p_lon,
+                            "phone": None,
+                            "website": None,
+                            "opening_hours": None,
+                            "osm_wikipedia": f"en:{title}",
+                            "osm_wikidata": None,
+                            "osm_image": None,
+                            "tags": [cat.title(), "Wikipedia Verified"],
+                            "raw_tags": {"tourism": cat, "wikipedia": f"en:{title}"}
+                        })
+                        if len(results) >= limit:
+                            break
+        except Exception:
+            pass
+
+        return results
+
+
 # Singleton instance
 wikimedia_service = WikimediaService()
+

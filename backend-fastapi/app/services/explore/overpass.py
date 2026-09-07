@@ -6,11 +6,11 @@ import httpx
 
 # Public Overpass API mirrors ordered by speed and reliability
 OVERPASS_ENDPOINTS = [
-    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
-    "https://lz4.overpass-api.de/api/interpreter",
-    "https://z.overpass-api.de/api/interpreter",
-    "https://overpass.kumi.systems/api/interpreter",
     "https://overpass-api.de/api/interpreter",
+    "https://lz4.overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://z.overpass-api.de/api/interpreter",
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
 ]
 
 # Canonical category mapping from OSM tags
@@ -123,7 +123,7 @@ class OverpassService:
             "User-Agent": "TravelTrack-App/5.0 (https://triptrack-frontend.onrender.com; contact: info@triptrack.app)",
             "Accept": "application/json",
         }
-        self.timeout = httpx.Timeout(2.5, connect=1.0)
+        self.timeout = httpx.Timeout(3.5, connect=1.2)
         self._cache: Dict[str, tuple[float, List[Dict[str, Any]]]] = {}
         self.cache_ttl = 86400  # 24 hours
 
@@ -293,16 +293,16 @@ class OverpassService:
 """
         else:  # "all"
             body = f"""
-  node["tourism"~"attraction|museum|gallery|viewpoint|hotel|resort|theme_park|zoo"](around:{radius},{lat},{lon});
-  way["tourism"~"attraction|museum|gallery|viewpoint|hotel|resort|theme_park|zoo"](around:{radius},{lat},{lon});
-  node["historic"~"monument|memorial|castle|fort|palace|ruins|heritage|archaeological_site|city_gate|tomb"](around:{radius},{lat},{lon});
+  node["tourism"~"attraction|museum|gallery|viewpoint|theme_park|zoo"](around:{radius},{lat},{lon});
+  way["tourism"~"attraction|museum|gallery|viewpoint|theme_park|zoo"](around:{radius},{lat},{lon});
+  node["historic"~"monument|memorial|castle|fort|palace|ruins|heritage|city_gate|tomb"](around:{radius},{lat},{lon});
   way["historic"~"monument|memorial|castle|fort|palace|ruins|heritage|archaeological_site|city_gate|tomb"](around:{radius},{lat},{lon});
-  node["amenity"~"restaurant|cafe"](around:{radius},{lat},{lon});
   node["leisure"~"park|garden|nature_reserve"](around:{radius},{lat},{lon});
-  node["natural"~"beach|waterfall|cliff"](around:{radius},{lat},{lon});
+  way["leisure"~"park|garden|nature_reserve"](around:{radius},{lat},{lon});
+  node["natural"~"beach|waterfall|cliff|peak"](around:{radius},{lat},{lon});
 """
 
-        query = f"""[out:json][timeout:4];
+        query = f"""[out:json][timeout:8];
 (
 {body}
 );
@@ -325,12 +325,12 @@ out center tags 40;
         lat: float,
         lon: float,
         category: str = "all",
-        radius: int = 8000
+        radius: int = 6000
     ) -> List[Dict[str, Any]]:
         """
         Query Overpass API around given coordinates and return deduplicated, normalized, noise-filtered place items.
         """
-        cache_key = f"overpass:v5:{round(lat, 3)}:{round(lon, 3)}:{category.lower()}"
+        cache_key = f"overpass:v6:{round(lat, 3)}:{round(lon, 3)}:{category.lower()}"
         cached = self._get_cache(cache_key)
         if cached is not None and len(cached) > 0:
             return cached
