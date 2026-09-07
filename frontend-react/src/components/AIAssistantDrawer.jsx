@@ -514,27 +514,7 @@ export const AIAssistantDrawer = () => {
                     wordBreak: 'break-word',
                   }}
                 >
-                  {/* Tool execution badge */}
-                  {m.tool_called && (
-                    <div
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '0.35rem',
-                        fontSize: '0.72rem',
-                        padding: '0.18rem 0.55rem',
-                        borderRadius: '6px',
-                        backgroundColor: 'rgba(95, 155, 104, 0.12)',
-                        color: 'var(--primary-green)',
-                        fontWeight: 600,
-                        marginBottom: '0.6rem',
-                        letterSpacing: '0.02em',
-                      }}
-                    >
-                      <CheckCircle2 size={12} />
-                      <span>{TOOL_LABELS[m.tool_called] || m.tool_called.replace(/_/g, ' ')}</span>
-                    </div>
-                  )}
+
 
                   {renderFormattedContent(m.content)}
 

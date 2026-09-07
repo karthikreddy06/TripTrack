@@ -271,7 +271,7 @@ export const Explore = () => {
           <em>want to wander?</em>
         </h1>
         <p className="explore-hero-subtitle">
-          Search authentic attractions, historic sights, local dining, cafes, and verified stays worldwide powered dynamically by OpenStreetMap &amp; Overpass.
+          Search authentic attractions, historic landmarks, local dining, cafes, and verified stays worldwide.
         </p>
 
         {/* Autocomplete Search Bar */}
@@ -623,7 +623,7 @@ export const Explore = () => {
         {loading ? (
           <div className="loading-state card" style={{ padding: '3.5rem 1.5rem', textAlign: 'center' }}>
             <div className="spinner" style={{ margin: '0 auto 1rem' }} />
-            <p style={{ color: 'var(--text-secondary)' }}>Discovering real places with OpenStreetMap &amp; Overpass...</p>
+            <p style={{ color: 'var(--text-secondary)' }}>Finding the best places in {searchQuery || 'your destination'}...</p>
           </div>
         ) : searchResults.length === 0 ? (
           <div className="empty-state card" style={{ padding: '3.5rem 1.5rem', textAlign: 'center' }}>

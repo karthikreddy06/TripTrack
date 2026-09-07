@@ -281,7 +281,7 @@ export const DestinationDetail = () => {
                   fontFamily: 'var(--font-mono)',
                 }}
               >
-                <span>OpenStreetMap &amp; Overpass Grounding</span>
+                <span>Verified Geographic Data</span>
               </div>
             </div>
           </div>

@@ -1,6 +1,7 @@
 import asyncio
+import re
 import time
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Set
 import httpx
 
 # Public Overpass API mirrors ordered by speed and reliability
@@ -12,9 +13,9 @@ OVERPASS_ENDPOINTS = [
     "https://overpass-api.de/api/interpreter",
 ]
 
-# Category mapping from OpenStreetMap tags to canonical Explore categories
+# Canonical category mapping from OSM tags
 OSM_CATEGORY_MAP = {
-    # Attractions
+    # Attractions & Landmarks
     "attraction": "attraction",
     "viewpoint": "attraction",
     "monument": "historic",
@@ -25,26 +26,36 @@ OSM_CATEGORY_MAP = {
     "palace": "historic",
     "archaeological_site": "historic",
     "heritage": "historic",
+    "city_gate": "historic",
+    "tower": "historic",
+    "tomb": "historic",
     "artwork": "attraction",
     "theme_park": "activity",
     "zoo": "activity",
     "aquarium": "activity",
-    # Museums
+    "water_park": "activity",
+    "beach": "attraction",
+    "waterfall": "attraction",
+    "cliff": "attraction",
+    # Museums & Culture
     "museum": "museum",
     "gallery": "museum",
+    "planetarium": "activity",
+    "theatre": "activity",
+    "arts_centre": "activity",
     # Stays / Accommodations
     "hotel": "hotel",
     "hostel": "hotel",
     "guest_house": "hotel",
     "motel": "hotel",
     "resort": "hotel",
-    "apartment": "hotel",
+    "bed_and_breakfast": "hotel",
     # Dining / Food
     "restaurant": "restaurant",
-    "fast_food": "restaurant",
     "food_court": "restaurant",
     "pub": "restaurant",
     "bar": "restaurant",
+    "bistro": "restaurant",
     # Cafes
     "cafe": "cafe",
     "bakery": "cafe",
@@ -53,24 +64,66 @@ OSM_CATEGORY_MAP = {
     "park": "park",
     "garden": "park",
     "nature_reserve": "park",
-    "pitch": "activity",
-    "water_park": "activity",
-    "sports_centre": "activity",
 }
+
+# Strict negative filter: Non-tourist amenities that MUST be discarded
+EXCLUDED_AMENITIES: Set[str] = {
+    "school", "college", "university", "kindergarten", "tuition", "language_school", "music_school",
+    "driving_school", "training", "clinic", "hospital", "doctors", "dentist", "pharmacy",
+    "veterinary", "bank", "atm", "bureau_de_change", "post_office", "police", "courthouse",
+    "townhall", "government", "local_government", "social_facility", "fire_station",
+    "waste_disposal", "car_wash", "car_repair", "fuel", "charging_station", "parking",
+    "parking_space", "parking_entrance", "toilets", "bench", "drinking_water", "telephone",
+    "recycling", "vending_machine", "place_of_worship_office", "political_office", "mortuary",
+    "crematorium", "grave_yard", "childcare", "nursing_home", "veterinary_clinic", "storage",
+    "car_rental", "compressed_air", "grit_bin", "parcel_locker", "public_bookcase"
+}
+
+# Strict negative filter: Commercial / administrative offices that MUST be discarded
+EXCLUDED_OFFICES: Set[str] = {
+    "government", "political_party", "educational_institution", "company", "lawyer",
+    "estate_agent", "it", "ngo", "administrative", "employment_agency", "diplomatic",
+    "telecommunication", "insurance", "financial", "consulting", "logistics", "accountant",
+    "architect", "association", "cooperative", "courier", "tax_advisor", "travel_agent",
+    "security", "advertising_agency", "quango", "foundation", "union"
+}
+
+# Non-tourist shops to discard unless explicitly searching shopping
+EXCLUDED_SHOPS: Set[str] = {
+    "convenience", "supermarket", "car", "car_repair", "car_parts", "tyres", "motorcycle",
+    "hardware", "doityourself", "chemist", "optician", "medical_supply", "laundry",
+    "dry_cleaning", "tailor", "hairdresser", "beauty", "massage", "tattoo", "butcher",
+    "seafood", "greengrocer", "stationery", "copyshop", "printing",
+    "electronics_repair", "mobile_phone", "pawnbroker", "funeral_directors", "storage",
+    "glaziery", "trade", "wholesale", "dry_cleaners", "kiosk", "newsagent"
+}
+
+# Regex for common non-tourist establishments
+EXCLUDED_NAME_REGEX = re.compile(
+    r"\b(typewriting|shorthand|coaching|tuition|classes\b|institute of|academy of|"
+    r"mla office|mp office|party office|political party|advocate|notary|attorney|law chambers|chambers\b|chembers\b|"
+    r"xerox|photostat|dry cleaners|dental clinic|polyclinic|nursing home|pathology|"
+    r"diagnostic|atm\b|branch\b|head office|sub office|consultancy|enterprises|"
+    r"traders|services pvt|logistics|car wash|auto repair|tyre center|hardware store|"
+    r"petrol pump|gas station|police station|chowki|post office|courier services|"
+    r"warehouse|residential building|society office|cable network|broadband|trust\b|"
+    r"academy\b|classes\b|residence\b|bungalow\b|house\b|apartments?\b)\b",
+    re.IGNORECASE
+)
 
 
 class OverpassService:
     """
     Service for querying OpenStreetMap elements via the Overpass API.
-    Provides 100% dynamic worldwide place discovery.
+    Provides 100% dynamic worldwide place discovery with strict noise exclusion.
     """
 
     def __init__(self):
         self.headers = {
-            "User-Agent": "TravelTrack-App/4.0 (https://triptrack-frontend.onrender.com; contact: info@triptrack.app)",
+            "User-Agent": "TravelTrack-App/5.0 (https://triptrack-frontend.onrender.com; contact: info@triptrack.app)",
             "Accept": "application/json",
         }
-        self.timeout = httpx.Timeout(1.8, connect=0.8)
+        self.timeout = httpx.Timeout(2.5, connect=1.0)
         self._cache: Dict[str, tuple[float, List[Dict[str, Any]]]] = {}
         self.cache_ttl = 86400  # 24 hours
 
@@ -85,18 +138,67 @@ class OverpassService:
         if val and len(val) > 0:
             self._cache[key] = (time.time(), val)
 
+    def is_valid_travel_place(self, tags: Dict[str, str], name: str, category: str = "all") -> bool:
+        """
+        Strictly evaluate whether an OSM entity is a genuine travel/tourist place.
+        Discards schools, offices, clinics, repair shops, typewriting institutes, private residences, etc.
+        """
+        if not name or len(name.strip()) < 2:
+            return False
+
+        name_clean = name.strip()
+
+        # 1. Regex check for noise names
+        if EXCLUDED_NAME_REGEX.search(name_clean):
+            return False
+
+        # 2. Check amenity blacklist
+        amenity = tags.get("amenity", "").lower()
+        if amenity in EXCLUDED_AMENITIES:
+            return False
+
+        # 3. Check office blacklist
+        office = tags.get("office", "").lower()
+        if office in EXCLUDED_OFFICES or (office and "office" in tags):
+            return False
+
+        # 4. Check craft blacklist
+        if "craft" in tags:
+            return False
+
+        # 5. Check shop blacklist
+        shop = tags.get("shop", "").lower()
+        if shop in EXCLUDED_SHOPS:
+            return False
+
+        # 6. Check building blacklist
+        building = tags.get("building", "").lower()
+        if building in ["apartments", "residential", "office", "commercial", "industrial", "warehouse", "dormitory", "garage", "house"]:
+            if "tourism" not in tags and "historic" not in tags:
+                return False
+
+        # Category-specific validity
+        cat_lower = category.lower().strip()
+        if cat_lower in ["attractions", "historic", "museums", "parks", "activities", "all"]:
+            if amenity in ["fast_food", "fuel", "car_wash"]:
+                return False
+
+        return True
+
     def _map_osm_category(self, tags: Dict[str, str]) -> str:
         """
         Determine the canonical TravelTrack category from OSM tags.
         """
-        if "tourism" in tags and tags["tourism"] in OSM_CATEGORY_MAP:
-            return OSM_CATEGORY_MAP[tags["tourism"]]
         if "historic" in tags and tags["historic"] in OSM_CATEGORY_MAP:
             return OSM_CATEGORY_MAP[tags["historic"]]
+        if "tourism" in tags and tags["tourism"] in OSM_CATEGORY_MAP:
+            return OSM_CATEGORY_MAP[tags["tourism"]]
         if "amenity" in tags and tags["amenity"] in OSM_CATEGORY_MAP:
             return OSM_CATEGORY_MAP[tags["amenity"]]
         if "leisure" in tags and tags["leisure"] in OSM_CATEGORY_MAP:
             return OSM_CATEGORY_MAP[tags["leisure"]]
+        if "natural" in tags and tags["natural"] in OSM_CATEGORY_MAP:
+            return OSM_CATEGORY_MAP[tags["natural"]]
         if "shop" in tags and tags["shop"] in ["bakery", "pastry", "coffee", "tea"]:
             return "cafe"
         return "attraction"
@@ -137,24 +239,25 @@ class OverpassService:
 
     def _build_overpass_query(self, lat: float, lon: float, category: str, radius: int) -> str:
         """
-        Construct an optimized Overpass QL query string for the requested category.
+        Construct an optimized Overpass QL query string for genuine travel places.
+        Strictly queries tourism, historic, landmark, museum, and curated dining/stay entities.
         """
         cat_lower = category.lower().strip()
 
-        if cat_lower == "hotels":
+        if cat_lower in ["hotels", "stays"]:
             body = f"""
-  node["tourism"~"hotel|hostel|guest_house|resort"](around:{radius},{lat},{lon});
-  way["tourism"~"hotel|hostel|guest_house|resort"](around:{radius},{lat},{lon});
+  node["tourism"~"hotel|resort|guest_house|hostel|motel"](around:{radius},{lat},{lon});
+  way["tourism"~"hotel|resort|guest_house|hostel|motel"](around:{radius},{lat},{lon});
 """
         elif cat_lower in ["restaurants", "dining"]:
             body = f"""
-  node["amenity"~"restaurant|fast_food|pub"](around:{radius},{lat},{lon});
-  way["amenity"~"restaurant|fast_food|pub"](around:{radius},{lat},{lon});
+  node["amenity"~"restaurant|food_court|bistro|pub"](around:{radius},{lat},{lon});
+  way["amenity"~"restaurant|food_court|bistro|pub"](around:{radius},{lat},{lon});
 """
         elif cat_lower == "cafes":
             body = f"""
   node["amenity"="cafe"](around:{radius},{lat},{lon});
-  node["shop"~"bakery|coffee"](around:{radius},{lat},{lon});
+  node["shop"~"bakery|coffee|tea|pastry"](around:{radius},{lat},{lon});
 """
         elif cat_lower == "museums":
             body = f"""
@@ -165,40 +268,45 @@ class OverpassService:
             body = f"""
   node["leisure"~"park|garden|nature_reserve"](around:{radius},{lat},{lon});
   way["leisure"~"park|garden|nature_reserve"](around:{radius},{lat},{lon});
+  node["natural"~"beach|waterfall|cliff"](around:{radius},{lat},{lon});
 """
         elif cat_lower == "historic":
             body = f"""
-  node["historic"~"monument|memorial|castle|fort|ruins|palace|archaeological_site|heritage"](around:{radius},{lat},{lon});
-  way["historic"~"monument|memorial|castle|fort|ruins|palace|archaeological_site|heritage"](around:{radius},{lat},{lon});
+  node["historic"~"monument|memorial|castle|fort|ruins|palace|archaeological_site|heritage|city_gate|tower|tomb"](around:{radius},{lat},{lon});
+  way["historic"~"monument|memorial|castle|fort|ruins|palace|archaeological_site|heritage|city_gate|tower|tomb"](around:{radius},{lat},{lon});
 """
         elif cat_lower == "activities":
             body = f"""
   node["tourism"~"theme_park|zoo|aquarium|water_park"](around:{radius},{lat},{lon});
   way["tourism"~"theme_park|zoo|aquarium|water_park"](around:{radius},{lat},{lon});
-  node["leisure"~"water_park|sports_centre"](around:{radius},{lat},{lon});
+  node["amenity"~"planetarium|theatre|arts_centre"](around:{radius},{lat},{lon});
 """
         elif cat_lower == "attractions":
             body = f"""
   node["tourism"~"attraction|museum|gallery|theme_park|zoo|aquarium|viewpoint"](around:{radius},{lat},{lon});
   way["tourism"~"attraction|museum|gallery|theme_park|zoo|aquarium|viewpoint"](around:{radius},{lat},{lon});
-  node["historic"~"monument|memorial|castle|fort|ruins|palace|heritage"](around:{radius},{lat},{lon});
-  way["historic"~"monument|memorial|castle|fort|ruins|palace|heritage"](around:{radius},{lat},{lon});
+  node["historic"~"monument|memorial|castle|fort|ruins|palace|archaeological_site|heritage|city_gate|tower|tomb"](around:{radius},{lat},{lon});
+  way["historic"~"monument|memorial|castle|fort|ruins|palace|archaeological_site|heritage|city_gate|tower|tomb"](around:{radius},{lat},{lon});
+  node["natural"~"beach|waterfall|cliff|peak"](around:{radius},{lat},{lon});
+  node["leisure"~"park|garden|nature_reserve"](around:{radius},{lat},{lon});
+  way["leisure"~"park|garden|nature_reserve"](around:{radius},{lat},{lon});
 """
         else:  # "all"
             body = f"""
-  node["tourism"~"attraction|museum|viewpoint|hotel|resort"](around:{radius},{lat},{lon});
-  way["tourism"~"attraction|museum|viewpoint|hotel|resort"](around:{radius},{lat},{lon});
-  node["historic"~"monument|memorial|castle|fort|palace|heritage"](around:{radius},{lat},{lon});
-  way["historic"~"monument|memorial|castle|fort|palace|heritage"](around:{radius},{lat},{lon});
+  node["tourism"~"attraction|museum|gallery|viewpoint|hotel|resort|theme_park|zoo"](around:{radius},{lat},{lon});
+  way["tourism"~"attraction|museum|gallery|viewpoint|hotel|resort|theme_park|zoo"](around:{radius},{lat},{lon});
+  node["historic"~"monument|memorial|castle|fort|palace|ruins|heritage|archaeological_site|city_gate|tomb"](around:{radius},{lat},{lon});
+  way["historic"~"monument|memorial|castle|fort|palace|ruins|heritage|archaeological_site|city_gate|tomb"](around:{radius},{lat},{lon});
   node["amenity"~"restaurant|cafe"](around:{radius},{lat},{lon});
-  node["leisure"~"park|garden"](around:{radius},{lat},{lon});
+  node["leisure"~"park|garden|nature_reserve"](around:{radius},{lat},{lon});
+  node["natural"~"beach|waterfall|cliff"](around:{radius},{lat},{lon});
 """
 
-        query = f"""[out:json][timeout:3];
+        query = f"""[out:json][timeout:4];
 (
 {body}
 );
-out center tags 30;
+out center tags 40;
 """
         return query
 
@@ -217,13 +325,12 @@ out center tags 30;
         lat: float,
         lon: float,
         category: str = "all",
-        radius: int = 6000
+        radius: int = 8000
     ) -> List[Dict[str, Any]]:
         """
-        Query Overpass API around given coordinates and return deduplicated, normalized place items.
-        Queries live mirrors sequentially with fast failover.
+        Query Overpass API around given coordinates and return deduplicated, normalized, noise-filtered place items.
         """
-        cache_key = f"overpass:{round(lat, 3)}:{round(lon, 3)}:{category.lower()}"
+        cache_key = f"overpass:v5:{round(lat, 3)}:{round(lon, 3)}:{category.lower()}"
         cached = self._get_cache(cache_key)
         if cached is not None and len(cached) > 0:
             return cached
@@ -232,7 +339,7 @@ out center tags 30;
         elements = []
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            for ep in OVERPASS_ENDPOINTS[:2]:
+            for ep in OVERPASS_ENDPOINTS[:3]:
                 try:
                     res_elements = await self._query_single_endpoint(client, ep, query)
                     if res_elements:
@@ -241,20 +348,23 @@ out center tags 30;
                 except Exception:
                     continue
 
-        # Parse, filter, and deduplicate
+        parsed_places: List[Dict[str, Any]] = []
         seen_names = set()
         seen_ids = set()
-        parsed_places: List[Dict[str, Any]] = []
 
         for el in elements:
             tags = el.get("tags", {})
             name = tags.get("name:en") or tags.get("name") or tags.get("int_name")
-            if not name or len(name.strip()) < 2:
+            if not name:
                 continue
 
             name_clean = name.strip()
-            norm_name = name_clean.lower()
 
+            # Strict noise & blacklist filtering
+            if not self.is_valid_travel_place(tags, name_clean, category):
+                continue
+
+            norm_name = name_clean.lower()
             if norm_name in seen_names:
                 continue
 
@@ -308,7 +418,8 @@ out center tags 30;
                 "osm_wikipedia": osm_wikipedia,
                 "osm_wikidata": osm_wikidata,
                 "osm_image": osm_image,
-                "tags": tags_list[:4]
+                "tags": tags_list[:4],
+                "raw_tags": tags
             })
 
         if parsed_places:
@@ -361,7 +472,8 @@ out center tags 30;
                             "osm_wikipedia": tags.get("wikipedia") or tags.get("wikipedia:en"),
                             "osm_wikidata": tags.get("wikidata"),
                             "osm_image": tags.get("image") or tags.get("wikimedia_commons"),
-                            "tags": []
+                            "tags": [],
+                            "raw_tags": tags
                         }
                         self._set_cache(cache_key, [res])
                         return res

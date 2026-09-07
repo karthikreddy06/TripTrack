@@ -673,26 +673,7 @@ export const AIPlanner = () => {
                       wordBreak: 'break-word'
                     }}
                   >
-                    {/* Tool Badge */}
-                    {m.tool_called && (
-                      <div
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '0.35rem',
-                          fontSize: '0.75rem',
-                          padding: '0.2rem 0.5rem',
-                          borderRadius: '4px',
-                          backgroundColor: 'rgba(95, 155, 104, 0.15)',
-                          color: 'var(--primary-green)',
-                          fontWeight: 600,
-                          marginBottom: '0.6rem'
-                        }}
-                      >
-                        <CheckCircle2 size={12} />
-                        <span>{TOOL_LABELS[m.tool_called] || m.tool_called.replace(/_/g, ' ')}</span>
-                      </div>
-                    )}
+
 
                     {renderFormattedContent(m.content)}
 
