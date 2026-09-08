@@ -82,11 +82,17 @@ export const PlaceDetail = () => {
           showSuccess(`Removed "${placeData.name}" from wishlist.`);
         }
       } else {
+        const locationStr = typeof placeData.address === 'string' && placeData.address
+          ? placeData.address
+          : (typeof placeData.location === 'string' && placeData.location
+            ? placeData.location
+            : (placeData.name || 'Destination'));
+
         await wishlistAPI.addToWishlist({
           place_id: pId,
           name: placeData.name,
           category: placeData.category,
-          location: placeData.location || placeData.address,
+          location: locationStr,
           image_url: null,
           rating: placeData.rating || null,
           description: placeData.description,
@@ -101,8 +107,8 @@ export const PlaceDetail = () => {
         setIsSaved(true);
         showSuccess(`Saved "${placeData.name}" to wishlist!`);
       }
-    } catch {
-      showError('Failed to update wishlist. Please try again.');
+    } catch (err) {
+      showError(extractErrorMessage(err) || 'Failed to update wishlist. Please try again.');
     } finally {
       setSavingWishlist(false);
     }
@@ -110,7 +116,11 @@ export const PlaceDetail = () => {
 
   const handlePlanAroundPlace = () => {
     if (!placeData) return;
-    const loc = placeData.location || placeData.address || placeData.name;
+    const loc = typeof placeData.address === 'string' && placeData.address
+      ? placeData.address
+      : (typeof placeData.location === 'string' && placeData.location
+        ? placeData.location
+        : (placeData.name || 'Destination'));
     const dest = loc.split(',')[0].trim();
     navigate('/ai-planner', {
       state: {
@@ -438,6 +448,7 @@ export const PlaceDetail = () => {
       {/* Add to Trip Modal */}
       {modalPlace && (
         <AddToTripModal
+          isOpen={Boolean(modalPlace)}
           place={modalPlace}
           onClose={() => setModalPlace(null)}
           onSuccess={() => {}}

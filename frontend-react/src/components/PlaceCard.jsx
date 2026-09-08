@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
-import { wishlistAPI } from '../services/api';
+import { wishlistAPI, extractErrorMessage } from '../services/api';
 import { EditorialCardBanner } from './EditorialCardBanner';
 import { formatDistance } from '../utils/geo';
 
@@ -54,11 +54,17 @@ export const PlaceCard = ({
           if (onWishlistToggled) onWishlistToggled(placeId, false);
         }
       } else {
+        const locationStr = typeof place.address === 'string' && place.address
+          ? place.address
+          : (typeof place.location === 'string' && place.location
+            ? place.location
+            : (place.name || 'Destination'));
+
         await wishlistAPI.addToWishlist({
           place_id: placeId,
           name: place.name,
           category: place.category,
-          location: place.location || place.address,
+          location: locationStr,
           image_url: null,
           rating: place.rating || null,
           description: place.description,
@@ -74,8 +80,8 @@ export const PlaceCard = ({
         showSuccess(`Saved "${place.name}" to wishlist!`);
         if (onWishlistToggled) onWishlistToggled(placeId, true);
       }
-    } catch {
-      showError('Failed to update wishlist. Please try again.');
+    } catch (err) {
+      showError(extractErrorMessage(err) || 'Failed to update wishlist. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -92,7 +98,11 @@ export const PlaceCard = ({
   const handlePlanWithAI = (e) => {
     e.preventDefault();
     e.stopPropagation();
-    const dest = place.location || place.address || place.name;
+    const dest = typeof place.address === 'string' && place.address
+      ? place.address
+      : (typeof place.location === 'string' && place.location
+        ? place.location
+        : (place.name || 'Destination'));
     const cleanDest = dest.split(',')[0].trim();
     navigate('/ai-planner', {
       state: {

@@ -3,6 +3,7 @@ import { useAuth } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
 import { Navbar } from './components/Navbar';
 import { ProtectedRoute } from './components/ProtectedRoute';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
 import { Dashboard } from './pages/Dashboard';
@@ -56,115 +57,119 @@ const RootRoute = () => {
 
 export default function App() {
   return (
-    <ToastProvider>
-      <div className="app-container">
-        <Navbar />
-        <Routes>
-          {/* Root dynamic redirect */}
-          <Route path="/" element={<RootRoute />} />
+    <ErrorBoundary>
+      <ToastProvider>
+        <div className="app-container">
+          <Navbar />
+          <ErrorBoundary>
+            <Routes>
+              {/* Root dynamic redirect */}
+              <Route path="/" element={<RootRoute />} />
 
-          {/* Public auth routes */}
-          <Route
-            path="/login"
-            element={
-              <PublicOnlyRoute>
-                <Login />
-              </PublicOnlyRoute>
-            }
-          />
-          <Route
-            path="/register"
-            element={
-              <PublicOnlyRoute>
-                <Register />
-              </PublicOnlyRoute>
-            }
-          />
+              {/* Public auth routes */}
+              <Route
+                path="/login"
+                element={
+                  <PublicOnlyRoute>
+                    <Login />
+                  </PublicOnlyRoute>
+                }
+              />
+              <Route
+                path="/register"
+                element={
+                  <PublicOnlyRoute>
+                    <Register />
+                  </PublicOnlyRoute>
+                }
+              />
 
-          {/* Explore routes (Accessible to both authenticated and browsing guests) */}
-          <Route path="/explore" element={<Explore />} />
-          <Route path="/explore/:destination" element={<DestinationDetail />} />
-          <Route path="/explore/place/:placeId" element={<PlaceDetail />} />
+              {/* Explore routes (Accessible to both authenticated and browsing guests) */}
+              <Route path="/explore" element={<Explore />} />
+              <Route path="/explore/:destination" element={<DestinationDetail />} />
+              <Route path="/explore/place/:placeId" element={<PlaceDetail />} />
 
-          {/* Protected app routes */}
-          <Route
-            path="/dashboard"
-            element={
-              <ProtectedRoute>
-                <Dashboard />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/trips"
-            element={
-              <ProtectedRoute>
-                <MyTrips />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/trips/new"
-            element={
-              <ProtectedRoute>
-                <CreateTrip />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/trips/create"
-            element={
-              <ProtectedRoute>
-                <CreateTrip />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/trips/:id"
-            element={
-              <ProtectedRoute>
-                <TripDetail />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/trips/:id/edit"
-            element={
-              <ProtectedRoute>
-                <EditTrip />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/wishlist"
-            element={
-              <ProtectedRoute>
-                <Wishlist />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/ai-planner"
-            element={
-              <ProtectedRoute>
-                <AIPlanner />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/profile"
-            element={
-              <ProtectedRoute>
-                <Profile />
-              </ProtectedRoute>
-            }
-          />
+              {/* Protected app routes */}
+              <Route
+                path="/dashboard"
+                element={
+                  <ProtectedRoute>
+                    <Dashboard />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/trips"
+                element={
+                  <ProtectedRoute>
+                    <MyTrips />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/trips/new"
+                element={
+                  <ProtectedRoute>
+                    <CreateTrip />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/trips/create"
+                element={
+                  <ProtectedRoute>
+                    <CreateTrip />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/trips/:id"
+                element={
+                  <ProtectedRoute>
+                    <TripDetail />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/trips/:id/edit"
+                element={
+                  <ProtectedRoute>
+                    <EditTrip />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/wishlist"
+                element={
+                  <ProtectedRoute>
+                    <Wishlist />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/ai-planner"
+                element={
+                  <ProtectedRoute>
+                    <AIPlanner />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/profile"
+                element={
+                  <ProtectedRoute>
+                    <Profile />
+                  </ProtectedRoute>
+                }
+              />
 
-          {/* 404 Catch-all */}
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-        <AIAssistantDrawer />
-      </div>
-    </ToastProvider>
+              {/* 404 Catch-all */}
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </ErrorBoundary>
+          <AIAssistantDrawer />
+        </div>
+      </ToastProvider>
+    </ErrorBoundary>
   );
 }

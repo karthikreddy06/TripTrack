@@ -54,7 +54,7 @@ const getFutureDateString = (daysAhead = 0) => {
   return `${y}-${m}-${d}`;
 };
 
-export const AddToTripModal = ({ isOpen, onClose, place }) => {
+export const AddToTripModal = ({ isOpen = true, onClose, place, onSuccess }) => {
   const { user, isAuthenticated } = useAuth();
   const { showSuccess, showError } = useToast();
 
@@ -160,17 +160,24 @@ export const AddToTripModal = ({ isOpen, onClose, place }) => {
       const chosenDayNum = parseInt(dayNumber, 10) || 1;
       const activityDate = calculateIsoDateForDay(selectedTrip?.start_date, chosenDayNum);
 
+      const loc = typeof place.address === 'string' && place.address
+        ? place.address
+        : (typeof place.location === 'string' && place.location
+          ? place.location
+          : (place.name || ''));
+      const pId = place.id || place.place_id || place.provider_id || place.provider_place_id || null;
+
       const res = await itineraryAPI.createActivity({
         trip_id: selectedTripId,
         day_number: chosenDayNum,
         date: activityDate,
         time: timeSlot || '10:00 AM',
         title: place.name ? place.name.trim().slice(0, 150) : 'Discovered Place',
-        location: (place.address || place.location || '').slice(0, 250),
-        description: (place.description || `${place.category?.toUpperCase() || 'PLACE'} in ${place.location || ''}`).slice(0, 900),
+        location: loc.slice(0, 250),
+        description: (place.description || `${place.category?.toUpperCase() || 'PLACE'} in ${loc}`).slice(0, 900),
         cost: estimatedCost ? parseFloat(estimatedCost) : 0,
         notes: place.category ? `Discovered on TravelTrack Explore (${place.category})` : '',
-        place_id: place.place_id || place.provider_place_id || null,
+        place_id: pId,
         category: place.category || null,
         image_url: place.image_url || (place.photos && place.photos[0]) || null,
       });
@@ -182,6 +189,7 @@ export const AddToTripModal = ({ isOpen, onClose, place }) => {
       }
 
       setAddedSuccessTrip(selectedTrip);
+      if (onSuccess) onSuccess(selectedTrip);
     } catch (err) {
       showError(extractErrorMessage(err));
     } finally {
@@ -199,6 +207,13 @@ export const AddToTripModal = ({ isOpen, onClose, place }) => {
 
     try {
       setSubmitting(true);
+
+      const loc = typeof place.address === 'string' && place.address
+        ? place.address
+        : (typeof place.location === 'string' && place.location
+          ? place.location
+          : (place.name || ''));
+      const pId = place.id || place.place_id || place.provider_id || place.provider_place_id || null;
 
       // 1. Create Trip in MongoDB
       const tripRes = await tripsAPI.createTrip({
@@ -221,11 +236,11 @@ export const AddToTripModal = ({ isOpen, onClose, place }) => {
         date: newTripStartDate,
         time: timeSlot || '10:00 AM',
         title: place.name ? place.name.trim().slice(0, 150) : 'Discovered Place',
-        location: (place.address || place.location || '').slice(0, 250),
-        description: (place.description || `${place.category?.toUpperCase() || 'PLACE'} in ${place.location || ''}`).slice(0, 900),
+        location: loc.slice(0, 250),
+        description: (place.description || `${place.category?.toUpperCase() || 'PLACE'} in ${loc}`).slice(0, 900),
         cost: estimatedCost ? parseFloat(estimatedCost) : 0,
         notes: place.category ? `Discovered on TravelTrack Explore (${place.category})` : '',
-        place_id: place.place_id || place.provider_place_id || null,
+        place_id: pId,
         category: place.category || null,
         image_url: place.image_url || (place.photos && place.photos[0]) || null,
       });
@@ -240,6 +255,7 @@ export const AddToTripModal = ({ isOpen, onClose, place }) => {
 
       showSuccess(`Created "${newlyCreatedTripObj.title}" and added "${place.name}"!`);
       setAddedSuccessTrip(newlyCreatedTripObj);
+      if (onSuccess) onSuccess(newlyCreatedTripObj);
     } catch (err) {
       showError(extractErrorMessage(err));
     } finally {

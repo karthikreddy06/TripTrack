@@ -395,6 +395,7 @@ export const DestinationDetail = () => {
       {/* Add To Trip Modal */}
       {modalPlace && (
         <AddToTripModal
+          isOpen={Boolean(modalPlace)}
           place={modalPlace}
           onClose={() => setModalPlace(null)}
           onSuccess={() => {}}

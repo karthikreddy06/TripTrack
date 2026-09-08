@@ -46,12 +46,19 @@ export const MapView = ({
   // Initialize Leaflet Map Instance
   useEffect(() => {
     if (!mapContainerRef.current) return;
+    let resizeObserver = null;
+    let timer = null;
 
     try {
       const initialLat = Array.isArray(center) ? center[0] : (center?.lat ?? 17.3850);
       const initialLng = Array.isArray(center) ? center[1] : (center?.lng ?? center?.lon ?? 78.4867);
 
       if (!mapInstanceRef.current) {
+        // Clear any stale Leaflet instance state attached to container DOM node
+        if (mapContainerRef.current && mapContainerRef.current._leaflet_id) {
+          delete mapContainerRef.current._leaflet_id;
+        }
+
         const map = L.map(mapContainerRef.current, {
           center: [initialLat, initialLng],
           zoom: zoom,
@@ -71,34 +78,52 @@ export const MapView = ({
       }
 
       // ResizeObserver to handle tab switches and container resizes
-      const resizeObserver = new ResizeObserver(() => {
-        if (mapInstanceRef.current) {
-          mapInstanceRef.current.invalidateSize();
-        }
-      });
-
-      if (mapContainerRef.current) {
+      if (typeof window !== 'undefined' && 'ResizeObserver' in window && mapContainerRef.current) {
+        resizeObserver = new ResizeObserver(() => {
+          if (mapInstanceRef.current) {
+            try {
+              mapInstanceRef.current.invalidateSize();
+            } catch {
+              // ignore if unmounting
+            }
+          }
+        });
         resizeObserver.observe(mapContainerRef.current);
       }
 
-      setTimeout(() => {
+      timer = setTimeout(() => {
         if (mapInstanceRef.current) {
-          mapInstanceRef.current.invalidateSize();
+          try {
+            mapInstanceRef.current.invalidateSize();
+          } catch {
+            // ignore
+          }
         }
       }, 200);
-
-      return () => {
-        resizeObserver.disconnect();
-      };
     } catch (err) {
       setMapError(err.message || 'Failed to initialize OpenStreetMap');
     }
 
     return () => {
+      if (timer) {
+        clearTimeout(timer);
+      }
+      if (resizeObserver) {
+        resizeObserver.disconnect();
+      }
       if (mapInstanceRef.current) {
-        mapInstanceRef.current.remove();
+        try {
+          mapInstanceRef.current.remove();
+        } catch {
+          // ignore
+        }
         mapInstanceRef.current = null;
       }
+      if (mapContainerRef.current && mapContainerRef.current._leaflet_id) {
+        delete mapContainerRef.current._leaflet_id;
+      }
+      markersLayerRef.current = null;
+      markersMapRef.current.clear();
     };
   }, []);
 

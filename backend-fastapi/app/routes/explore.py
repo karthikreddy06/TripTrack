@@ -223,6 +223,7 @@ async def get_destination(destination: str):
 
 
 @router.get("/places/{place_id}", response_model=PlaceDetailsResponse)
+@router.get("/place/{place_id}", response_model=PlaceDetailsResponse)
 async def get_place(place_id: str):
     """
     Retrieve full details for a place with coordinates, verified photo, and source attribution.

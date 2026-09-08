@@ -514,7 +514,25 @@ export const AIAssistantDrawer = () => {
                     wordBreak: 'break-word',
                   }}
                 >
-
+                  {m.tool_called && (
+                    <div
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.35rem',
+                        fontSize: '0.72rem',
+                        color: 'var(--primary-green)',
+                        fontWeight: 600,
+                        backgroundColor: 'rgba(95,155,104,0.1)',
+                        padding: '0.2rem 0.5rem',
+                        borderRadius: '4px',
+                        marginBottom: '0.4rem',
+                      }}
+                    >
+                      <CheckCircle2 size={12} />
+                      {TOOL_LABELS[m.tool_called] || m.tool_called}
+                    </div>
+                  )}
 
                   {renderFormattedContent(m.content)}
 

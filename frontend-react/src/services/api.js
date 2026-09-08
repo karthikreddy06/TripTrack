@@ -231,6 +231,9 @@ export const itineraryAPI = {
       description: activityData.description || '',
       cost: parseFloat(activityData.cost) || 0,
       notes: activityData.notes || '',
+      place_id: activityData.place_id || null,
+      category: activityData.category || null,
+      image_url: activityData.image_url || null,
     };
     const response = await apiClient.post('/itinerary/', payload);
     return response.data;
@@ -246,6 +249,9 @@ export const itineraryAPI = {
     if (activityData.description !== undefined) payload.description = activityData.description;
     if (activityData.cost !== undefined) payload.cost = parseFloat(activityData.cost) || 0;
     if (activityData.notes !== undefined) payload.notes = activityData.notes;
+    if (activityData.place_id !== undefined) payload.place_id = activityData.place_id;
+    if (activityData.category !== undefined) payload.category = activityData.category;
+    if (activityData.image_url !== undefined) payload.image_url = activityData.image_url;
 
     const response = await apiClient.put(`/itinerary/${activityId}`, payload);
     return response.data;

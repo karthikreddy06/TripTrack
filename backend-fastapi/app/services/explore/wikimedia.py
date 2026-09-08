@@ -236,7 +236,81 @@ class WikimediaService:
 
         return results
 
+    async def get_place_by_pageid(self, pageid: str) -> Optional[Dict[str, Any]]:
+        """
+        Directly retrieve place entity details by Wikipedia page ID.
+        """
+        clean_id = str(pageid).replace("wiki_", "").strip()
+        if not clean_id.isdigit():
+            return None
+
+        cache_key = f"wiki_pageid:{clean_id}"
+        cached = self._get_cache(cache_key)
+        if cached is not None:
+            return cached
+
+        url = "https://en.wikipedia.org/w/api.php"
+        params = {
+            "action": "query",
+            "pageids": clean_id,
+            "prop": "info|coordinates|extracts|pageimages",
+            "explaintext": "1",
+            "exintro": "1",
+            "piprop": "original|thumbnail",
+            "pithumbsize": "800",
+            "inprop": "url",
+            "format": "json"
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout, headers=self.headers) as client:
+                res = await client.get(url, params=params)
+                if res.status_code == 200:
+                    data = res.json()
+                    pages = data.get("query", {}).get("pages", {})
+                    page_info = pages.get(clean_id)
+                    if page_info and "missing" not in page_info:
+                        title = page_info.get("title", "")
+                        extract = page_info.get("extract", "")
+                        coords_list = page_info.get("coordinates", [])
+                        lat = float(coords_list[0].get("lat", 0.0)) if coords_list else 0.0
+                        lon = float(coords_list[0].get("lon", 0.0)) if coords_list else 0.0
+                        orig_img = page_info.get("original", {}).get("source")
+                        thumb_img = page_info.get("thumbnail", {}).get("source")
+                        img = orig_img or thumb_img
+                        full_url = page_info.get("fullurl")
+
+                        result = {
+                            "id": f"wiki_{clean_id}",
+                            "place_id": f"wiki_{clean_id}",
+                            "provider_id": f"wikipedia/{clean_id}",
+                            "name": title,
+                            "category": "attraction",
+                            "address": title,
+                            "description": extract or None,
+                            "lat": lat,
+                            "lon": lon,
+                            "phone": None,
+                            "website": full_url,
+                            "opening_hours": None,
+                            "image_url": img,
+                            "image_verified": bool(img),
+                            "image_source": "wikipedia" if img else None,
+                            "image_source_url": full_url,
+                            "wikipedia_url": full_url,
+                            "osm_wikipedia": f"en:{title}",
+                            "tags": ["Attraction", "Wikipedia Verified"]
+                        }
+                        self._set_cache(cache_key, result)
+                        return result
+        except Exception:
+            pass
+
+        self._set_cache(cache_key, None)
+        return None
+
 
 # Singleton instance
 wikimedia_service = WikimediaService()
+
 

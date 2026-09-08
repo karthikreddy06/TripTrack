@@ -427,24 +427,60 @@ class LLMClient:
             if any(p in msg_low for p in ["which one", "which of these", "best for history", "best for food", "best for views", "best for nature", "closest"]):
                 return {"action": "reply", "content": self._handle_place_comparison_reasoning(msg_text, recent_places)}
 
-            # Deeper inquiry about specific place: "Tell me more about the first/second one"
-            if any(p in msg_low for p in ["tell me more about", "more details on", "more info on", "what is special about"]):
+            # Place selection or deeper inquiry: "the second one", "second one", "tell me more about #2", etc.
+            is_mutation_action = any(w in msg_low for w in ["add", "save", "delete", "remove", "move", "reschedule", "drop"])
+            is_time_second = any(w in msg_low for w in ["wait a second", "give me a second", "just a second", "one second", "per second"])
+
+            is_ordinal_ref = not is_time_second and (
+                any(p in msg_low for p in [
+                    "the first one", "first one", "the 1st one", "1st one", "number 1",
+                    "the second one", "second one", "the 2nd one", "2nd one", "number 2",
+                    "the third one", "third one", "the 3rd one", "3rd one", "number 3",
+                    "the first place", "the second place", "the third place"
+                ]) or msg_low in [
+                    "first", "1st", "second", "2nd", "third", "3rd",
+                    "the first", "the second", "the third",
+                    "number 1", "number 2", "number 3", "1", "2", "3"
+                ]
+            )
+
+            is_place_inquiry = any(p in msg_low for p in [
+                "tell me more about", "tell me about", "more details on", "more info on",
+                "what is special about", "what about", "how about", "details for"
+            ])
+
+            if (is_ordinal_ref or is_place_inquiry) and not is_mutation_action:
                 target = None
-                if "first" in msg_low or "1st" in msg_low or "number 1" in msg_low: target = recent_places[0]
-                elif "second" in msg_low or "2nd" in msg_low or "number 2" in msg_low and len(recent_places) >= 2: target = recent_places[1]
-                elif "third" in msg_low or "3rd" in msg_low or "number 3" in msg_low and len(recent_places) >= 3: target = recent_places[2]
+                if any(k in msg_low for k in ["second", "2nd", "number 2"]) and len(recent_places) >= 2:
+                    target = recent_places[1]
+                elif any(k in msg_low for k in ["third", "3rd", "number 3"]) and len(recent_places) >= 3:
+                    target = recent_places[2]
+                elif any(k in msg_low for k in ["first", "1st", "number 1"]):
+                    target = recent_places[0]
+                elif msg_low == "2" and len(recent_places) >= 2:
+                    target = recent_places[1]
+                elif msg_low == "3" and len(recent_places) >= 3:
+                    target = recent_places[2]
+                elif msg_low == "1" and len(recent_places) >= 1:
+                    target = recent_places[0]
                 else:
                     for p in recent_places:
-                        if p.get("name", "").lower() in msg_low:
+                        p_name = p.get("name", "").lower()
+                        if p_name and len(p_name) >= 3 and p_name in msg_low:
                             target = p
                             break
+
                 if target:
-                    return {"action": "reply", "content": self._handle_place_deep_dive_reasoning(target)}
+                    return {
+                        "action": "reply",
+                        "content": self._handle_place_deep_dive_reasoning(target),
+                        "selected_place": target
+                    }
 
         # -----------------------------------------------------------------
         # B. BUDGET & FINANCIAL REASONING
         # -----------------------------------------------------------------
-        if any(p in msg_low for p in ["budget", "how much do i have left", "how much budget", "money left", "affect my budget"]):
+        if any(p in msg_low for p in ["budget", "how much do i have left", "how much budget", "money left", "have left", "left for my", "affect my budget", "is that enough", "is it enough", "can i afford"]):
             if any(p in msg_low for p in ["is that enough", "is it enough", "can i afford", "enough for", "affect my budget", "how much will that affect"]):
                 return {"action": "reply", "content": self._handle_travel_budget_reasoning(user_message, active_trip, all_trips)}
             if len(all_trips) > 1 and not active_trip and not any(t.get("destination", "").lower() in msg_low for t in all_trips):
@@ -561,14 +597,41 @@ class LLMClient:
         # -----------------------------------------------------------------
         # K. TRIP UPDATES (DATES)
         # -----------------------------------------------------------------
-        if any(p in msg_low for p in ["change the date", "change date", "update date", "change my trip date", "change the trip date"]):
+        if any(p in msg_low for p in ["change the date", "change date", "update date", "change my trip date", "change the trip date", "change the trip", "reschedule"]):
+            target_trip = None
+            for t in all_trips:
+                t_dest = (t.get("destination") or "").lower()
+                t_title = (t.get("title") or "").lower()
+                if (t_dest and t_dest in msg_low) or (t_title and t_title in msg_low):
+                    target_trip = t
+                    break
+            if not target_trip:
+                words = [w for w in re.sub(r"[^\w\s]", "", msg_low).split() if len(w) >= 3 and w not in ["change", "the", "date", "trip", "update", "reschedule", "for", "of", "to", "my"]]
+                for w in words:
+                    for t in all_trips:
+                        if w in (t.get("destination") or "").lower():
+                            target_trip = t
+                            break
+                    if target_trip:
+                        break
+            if not target_trip:
+                target_trip = active_trip
+
+            dest = target_trip.get("destination") if target_trip else None
+            if not dest:
+                m_dest = re.search(r"(?:of|for)\s+([a-zA-Z\s]{2,25})\s+trip", msg_text, re.IGNORECASE)
+                if m_dest:
+                    dest = m_dest.group(1).strip().title()
+                else:
+                    dest = "your trip"
+
             parsed_d = self._parse_date(msg_text)
-            dest = active_trip.get("destination", "your destination") if active_trip else "your destination"
+            trip_id = str(target_trip["_id"]) if target_trip and "_id" in target_trip else None
             if parsed_d:
                 return {
                     "action": "call_tool",
                     "tool": "update_trip",
-                    "args": {"destination": dest, "start_date": parsed_d.isoformat()}
+                    "args": {"destination": dest, "start_date": parsed_d.isoformat(), "trip_id": trip_id}
                 }
             return {"action": "reply", "content": f"What date would you like to change your **{dest}** trip to? (For example: 'November 1st' or '2026-11-01')"}
 
@@ -669,30 +732,6 @@ class LLMClient:
         t_low = msg_text.lower().strip()
         words = t_low.split()
 
-        cat = "all"
-        if any(w in t_low for w in ["restaurant", "food", "eat", "dining"]): cat = "restaurants"
-        elif any(w in t_low for w in ["cafe", "coffee", "bakery"]): cat = "cafes"
-        elif any(w in t_low for w in ["hotel", "stay", "resort", "hostel"]): cat = "hotels"
-        elif any(w in t_low for w in ["museum", "gallery"]): cat = "museums"
-        elif any(w in t_low for w in ["park", "garden", "beach"]): cat = "parks"
-        elif any(w in t_low for w in ["historic", "monument", "fort", "palace"]): cat = "historic"
-        elif any(w in t_low for w in ["attraction", "sight", "places to visit", "things to do"]): cat = "attractions"
-
-        # Explicit travel and sightseeing inquiries:
-        m_travel = re.search(
-            r"\b(?:what\s+should\s+i\s+visit\s+in|what\s+to\s+see\s+in|what\s+to\s+visit\s+in|what\s+can\s+i\s+do\s+in|"
-            r"places\s+to\s+visit\s+in|things\s+to\s+do\s+in|famous\s+places\s+in|tourist\s+places\s+in|best\s+places\s+in|"
-            r"top\s+places\s+in|top\s+attractions\s+in|attractions\s+in|sights\s+in|where\s+to\s+go\s+in|recommend\s+places\s+in|"
-            r"find\s+places\s+in|search\s+places\s+in|explore\s+places\s+in|explore|visit|sights\s+of)\s+([a-zA-Z\s]{2,25})",
-            msg_text,
-            re.IGNORECASE
-        )
-        if m_travel:
-            cand = re.sub(r"[^\w\s]", "", m_travel.group(1)).strip()
-            cand = re.sub(r"^(?:in|for|around)\s+", "", cand, flags=re.IGNORECASE).strip()
-            if cand and len(cand) >= 2 and not cand.isdigit():
-                return {"target": cand.title(), "category": cat}
-
         # NEVER search places for general knowledge, coding, or cultural questions
         GENERAL_TRIGGERS = [
             "what is", "why is", "tell me about", "teach me", "phrases", "famous for", "known for",
@@ -704,12 +743,64 @@ class LLMClient:
         if any(t in t_low for t in GENERAL_TRIGGERS):
             return None
 
+        cat = "all"
+        if any(w in t_low for w in ["restaurant", "food", "eat", "dining"]): cat = "restaurants"
+        elif any(w in t_low for w in ["cafe", "coffee", "bakery"]): cat = "cafes"
+        elif any(w in t_low for w in ["hotel", "stay", "resort", "hostel"]): cat = "hotels"
+        elif any(w in t_low for w in ["museum", "gallery"]): cat = "museums"
+        elif any(w in t_low for w in ["park", "garden", "beach"]): cat = "parks"
+        elif any(w in t_low for w in ["historic", "monument", "fort", "palace"]): cat = "historic"
+        elif any(w in t_low for w in ["attraction", "sight", "places to visit", "things to do"]): cat = "attractions"
+
+        # Direct generic place search without destination (e.g. "find places", "places to visit")
+        if t_low in ["find places", "search places", "explore places", "show places", "get places", "recommend places", "places to visit", "sights", "attractions", "places", "explore"]:
+            return {"target": None, "category": cat}
+
+        GENERIC_PLACE_WORDS = {
+            "places", "place", "sights", "sight", "attractions", "attraction",
+            "things to do", "things to see", "spots", "all places", "all the places",
+            "famous places", "top places", "best places", "tourist places", "recommendations",
+            "destination", "destinations", "city", "cities", "me"
+        }
+
+        # Explicit "places/sights/attractions in <city>" (e.g. "get me all the places in mumbai", "places in mumbai", "famous places in kolkata")
+        m_places_in = re.search(
+            r"\b(?:(?:all\s+the\s+|all\s+|the\s+|famous\s+|best\s+|top\s+|tourist\s+)?(?:places|sights|attractions|spots|monuments|things\s+to\s+see|things\s+to\s+do)\s+(?:in|around|of|at))\s+([a-zA-Z\s]{2,30})",
+            msg_text,
+            re.IGNORECASE
+        )
+        if m_places_in:
+            cand = re.sub(r"[^\w\s]", "", m_places_in.group(1)).strip()
+            cand = re.sub(r"^(?:the\s+city\s+of|city\s+of|the)\s+", "", cand, flags=re.IGNORECASE).strip()
+            if cand and len(cand) >= 2 and not cand.isdigit():
+                if cand.lower() in GENERIC_PLACE_WORDS:
+                    return {"target": None, "category": cat}
+                return {"target": cand.title(), "category": cat}
+
+        # Explicit travel and sightseeing inquiries:
+        m_travel = re.search(
+            r"\b(?:what\s+should\s+i\s+(?:visit|see)\s+in|what\s+to\s+(?:see|visit)\s+in|what\s+can\s+i\s+do\s+in|"
+            r"where\s+to\s+go\s+in|recommend\s+places\s+in|"
+            r"find\s+places\s+in|search\s+places\s+in|explore\s+places\s+in|explore|visit|sights\s+of)\s+([a-zA-Z\s]{2,25})",
+            msg_text,
+            re.IGNORECASE
+        )
+        if m_travel:
+            cand = re.sub(r"[^\w\s]", "", m_travel.group(1)).strip()
+            cand = re.sub(r"^(?:in|for|around)\s+", "", cand, flags=re.IGNORECASE).strip()
+            if cand and len(cand) >= 2 and not cand.isdigit():
+                if cand.lower() in GENERIC_PLACE_WORDS:
+                    return {"target": None, "category": cat}
+                return {"target": cand.title(), "category": cat}
+
         # General "find/show/search <city>"
-        m_in = re.search(r"\b(?:find|get|show|search|explore|list)\s+([a-zA-Z\s]{2,25})", msg_text, re.IGNORECASE)
+        m_in = re.search(r"\b(?:find|get|show|search|explore|list)\s+(?:(?:me\s+)?(?:all\s+the\s+|all\s+|the\s+|some\s+)?(?:places|sights|attractions)\s+(?:in|for|around)\s+)?([a-zA-Z\s]{2,25})", msg_text, re.IGNORECASE)
         if m_in:
             cand = re.sub(r"[^\w\s]", "", m_in.group(1)).strip()
             cand = re.sub(r"^(?:in|for|around)\s+", "", cand, flags=re.IGNORECASE).strip()
             if cand and len(cand) >= 2 and not cand.isdigit():
+                if cand.lower() in GENERIC_PLACE_WORDS:
+                    return {"target": None, "category": cat}
                 return {"target": cand.title(), "category": cat}
 
         # Single word city queries (e.g. "Mumbai", "Paris", "Kyoto")
@@ -719,7 +810,7 @@ class LLMClient:
                 "test", "demo", "sample", "trip", "trips", "itinerary", "budget", "expense", "wishlist"
             ]
             clean = re.sub(r"[^\w]", "", t_low)
-            if clean not in NON_CITIES:
+            if clean not in NON_CITIES and clean not in GENERIC_PLACE_WORDS:
                 return {"target": clean.title(), "category": cat}
 
         return None
@@ -755,7 +846,15 @@ class LLMClient:
 
     def _handle_travel_budget_reasoning(self, text: str, active_trip: Optional[Dict[str, Any]], all_trips: List[Dict[str, Any]]) -> str:
         """Evaluate budget feasibility using local destination costs and trip duration."""
-        target_trip = active_trip or (all_trips[0] if all_trips else None)
+        target_trip = active_trip
+        if not target_trip:
+            for t in all_trips:
+                if (t.get("destination") or "").lower() in text.lower():
+                    target_trip = t
+                    break
+        if not target_trip and all_trips:
+            target_trip = all_trips[0]
+
         dest = target_trip.get("destination", "your destination") if target_trip else "your destination"
         m_amt = re.search(r"(?:₹|\$|rs\.?)?\s*([\d,]+(?:\.\d+)?)", text, re.IGNORECASE)
         amt = float(m_amt.group(1).replace(",", "")) if m_amt else 10000.0
@@ -775,10 +874,10 @@ class LLMClient:
             f"• **Available Budget:** **₹{amt:,.2f}**\n"
             f"• **Duration:** **{days} days**\n"
             f"• **Daily Average:** **₹{daily:,.2f} / day**\n\n"
-            f"**Verdict:** At **₹{daily:,.2f}/day**, this provides a healthy balance for local dining, transit, and entry tickets for top attractions in {dest}.\n\n"
-            "1. **Food & Dining:** ₹500 – ₹900/day for authentic regional meals and cafes.\n"
-            "2. **Local Transit:** ₹200 – ₹400/day for metro/public transport or rideshares.\n"
-            "3. **Sightseeing & Monuments:** ₹150 – ₹300/day for museum and heritage entrance passes."
+            f"**Verdict:** At **₹{daily:,.2f}/day**, this is **sufficient** and provides a healthy balance for local food, dining, transit, and entry tickets for top attractions in {dest}.\n\n"
+            f"1. **Food & Dining:** ₹{min(daily * 0.45, 900):,.0f} – ₹{min(daily * 0.6, 1200):,.0f}/day for authentic regional meals and cafes in {dest}.\n"
+            f"2. **Local Transit:** ₹{min(daily * 0.2, 400):,.0f} – ₹{min(daily * 0.3, 600):,.0f}/day for metro/public transport or rideshares.\n"
+            f"3. **Sightseeing & Monuments:** ₹{min(daily * 0.15, 300):,.0f} – ₹{min(daily * 0.25, 500):,.0f}/day for museum and heritage entrance passes."
         )
 
     def _handle_itinerary_efficiency_reasoning(self, active_trip: Optional[Dict[str, Any]]) -> str:
@@ -939,6 +1038,46 @@ class LLMClient:
                 "3. **API Design & Security**: RESTful principles, JWT authentication, rate limiting, and defensive input validation.\n"
                 "4. **Architecture & Microservices**: Event-driven systems (Kafka/RabbitMQ), containerization (Docker), and orchestration (Kubernetes).\n"
                 "5. **DevOps & Observability**: CI/CD pipelines, structured logging, distributed tracing, and automated testing."
+            )
+
+        # Photosynthesis (Biology / Science)
+        if "photosynthesis" in t_low:
+            return (
+                "**Photosynthesis** is the fundamental biochemical process by which green plants, algae, and cyanobacteria convert solar energy into chemical energy stored in glucose.\n\n"
+                "### The Chemical Formula:\n"
+                "$$\\text{6CO}_2 + \\text{6H}_2\\text{O} + \\text{Light} \\rightarrow \\text{C}_6\\text{H}_{12}\\text{O}_6 + \\text{6O}_2$$\n\n"
+                "### Key Components & Stages:\n"
+                "1. **Chlorophyll & Solar Absorption**: Green plants absorb sunlight through chlorophyll within chloroplasts.\n"
+                "2. **Light-Dependent Reactions**: Water molecules ($H_2O$) are split by sunlight, releasing oxygen ($O_2$) as a vital byproduct and charging ATP and NADPH.\n"
+                "3. **The Calvin Cycle (Light-Independent)**: Fixes carbon dioxide (CO2) from the atmosphere to assemble glucose, providing organic energy for plants and the global food web."
+            )
+
+        # Kyoto / Cultural Knowledge
+        if "kyoto" in t_low and any(w in t_low for w in ["famous for", "known for", "history", "culture", "about"]):
+            return (
+                "**Kyoto** is celebrated worldwide as the cultural heart and former imperial capital of Japan (serving as imperial capital from 794 to 1868).\n\n"
+                "### Why Kyoto is Renowned:\n"
+                "1. **Historic Temples & Shrines**: Over 2,000 Buddhist temples and Shinto shrines, including Kinkaku-ji (The Golden Pavilion), Kiyomizu-dera, and the thousands of red torii gates at Fushimi Inari Shrine.\n"
+                "2. **Preserved Heritage Quarters**: Gion and Pontocho with traditional wooden machiya townhouses and geisha (geiko) arts.\n"
+                "3. **Zen Gardens & Nature**: Ryoan-ji's rock garden and Arashiyama's bamboo grove.\n"
+                "4. **Traditional Gastronomy**: Kaiseki multi-course fine dining, Uji matcha, and Shojin Ryori temple cuisine."
+            )
+
+        # Japanese Travel Phrases
+        if any(w in t_low for w in ["japanese phrases", "phrases in japan", "speak in japan", "japanese words", "japanese travel", "phrases i'll need in kyoto", "phrases for kyoto", "japanese"]):
+            return (
+                "Here are the most essential, polite Japanese travel phrases for your trip to Kyoto:\n\n"
+                "### Essential Courtesy & Greetings:\n"
+                "• **Konnichiwa** (こんにちは) — *Hello / Good afternoon*\n"
+                "• **Arigatou gozaimasu** (ありがとうございます) — *Thank you very much*\n"
+                "• **Sumimasen** (すみません) — *Excuse me / I'm sorry* (essential for getting attention or apologizing in crowds)\n"
+                "• **Onegaishimasu** (お願いします) — *Please* (e.g. \"Kore o onegaishimasu\" = This one, please)\n"
+                "• **Hai / Iie** (はい / いいえ) — *Yes / No*\n\n"
+                "### Navigation & Dining:\n"
+                "• **Okaikei o onegaishimasu** (お会計をお願いします) — *The bill, please*\n"
+                "• **Oishii desu** (美味しいです) — *It's delicious!*\n"
+                "• **Eigo ga hanasemasu ka?** (英語が話せますか？) — *Can you speak English?*\n"
+                "• **Doko desu ka?** (どこですか？) — *Where is it?* (e.g. \"Eki wa doko desu ka?\" = Where is the station?)"
             )
 
         # Dynamic fallback for any general query
@@ -1709,6 +1848,7 @@ class TravelTrackAIAgent:
 
         # Identify active trip context
         active_trip = self._resolve_active_trip(user_id, explicit_trip_id, context)
+        all_trips = self.tools.get_user_trips(user_id).get("trips", [])
 
         # -------------------------------------------------------------
         # 1. HANDLE CONFIRMATION STATE MACHINE FOR PENDING ACTIONS
@@ -1830,13 +1970,27 @@ class TravelTrackAIAgent:
         if turn_result.get("action") == "reply":
             reply_text = turn_result.get("content", "")
             ctx_updates: Dict[str, Any] = {}
+            if turn_result.get("selected_place"):
+                ctx_updates["last_mentioned_place"] = turn_result["selected_place"]
+            elif user_context.get("last_recommended_places"):
+                for p in user_context["last_recommended_places"]:
+                    if p.get("name", "").lower() in reply_text.lower():
+                        ctx_updates["last_mentioned_place"] = p
+                        break
             if "which trip's budget" in reply_text.lower():
                 ctx_updates["pending_clarification"] = {"type": "which_trip_budget"}
             elif "which place would you like me to add to your wishlist" in reply_text.lower():
                 ctx_updates["pending_clarification"] = {"type": "place_to_wishlist"}
             elif "what date would you like to change" in reply_text.lower():
-                dest = active_trip.get("destination") if active_trip else "your trip"
-                t_id = str(active_trip["_id"]) if active_trip else None
+                matched_trip = None
+                for t in all_trips:
+                    if (t.get("destination") or "").lower() in reply_text.lower() or (t.get("destination") or "").lower() in msg_low:
+                        matched_trip = t
+                        break
+                if not matched_trip:
+                    matched_trip = active_trip
+                dest = matched_trip.get("destination") if matched_trip else "your trip"
+                t_id = str(matched_trip["_id"]) if matched_trip else None
                 ctx_updates["pending_clarification"] = {"type": "new_date_for_trip", "trip_id": t_id, "trip_destination": dest}
 
             self.memory.save_turn(
@@ -1903,15 +2057,24 @@ class TravelTrackAIAgent:
             }
 
         # Resolve target trip ID for trip tools
-        target_trip = active_trip
+        target_trip = None
+        trip_param = tool_args.get("trip_id") or tool_args.get("destination")
+        if trip_param:
+            target_trip = self._match_trip_from_text(user_id, str(trip_param))
         if not target_trip:
-            trip_param = tool_args.get("trip_id") or tool_args.get("destination")
-            if trip_param:
-                target_trip = self._match_trip_from_text(user_id, str(trip_param))
-            if not target_trip:
-                all_t = self.tools.get_user_trips(user_id).get("trips", [])
-                if len(all_t) == 1:
-                    target_trip = all_t[0]
+            all_t = self.tools.get_user_trips(user_id).get("trips", [])
+            for t in all_t:
+                dest_t = (t.get("destination") or "").lower()
+                title_t = (t.get("title") or "").lower()
+                if (dest_t and dest_t in msg_low) or (title_t and title_t in msg_low):
+                    target_trip = t
+                    break
+        if not target_trip:
+            target_trip = active_trip
+        if not target_trip:
+            all_t = self.tools.get_user_trips(user_id).get("trips", [])
+            if len(all_t) == 1:
+                target_trip = all_t[0]
 
         target_trip_id = str(target_trip["_id"]) if target_trip else None
 

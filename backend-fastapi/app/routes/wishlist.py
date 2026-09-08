@@ -63,6 +63,12 @@ def get_user_wishlist(
     items = []
     for doc in cursor:
         doc["_id"] = str(doc["_id"])
+        if not isinstance(doc.get("location"), str):
+            loc_val = doc.get("location")
+            if isinstance(loc_val, dict):
+                doc["location"] = loc_val.get("address") or loc_val.get("city") or "Destination"
+            else:
+                doc["location"] = str(loc_val or "Destination")
         items.append(doc)
     return items
 

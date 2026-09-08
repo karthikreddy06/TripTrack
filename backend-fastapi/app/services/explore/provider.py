@@ -603,6 +603,8 @@ class ExploreProvider:
         if not place_id:
             return None
 
+        parts = place_id.split("_")
+
         # 1. Check in-memory store
         if place_id in _PLACES_STORE:
             p = _PLACES_STORE[place_id]
@@ -612,13 +614,63 @@ class ExploreProvider:
             ][:4]
             return {"place": p, "nearby_places": nearby}
 
-        # 2. Try parsing osm_{type}_{id}
-        parts = place_id.split("_")
+        # 2. Try parsing wiki_{pageid}
+        if place_id.startswith("wiki_") or (len(parts) >= 2 and parts[0] == "wiki"):
+            pageid = parts[1] if len(parts) >= 2 else place_id.replace("wiki_", "")
+            wiki_place = await self.wikimedia.get_place_by_pageid(pageid)
+            if wiki_place:
+                _PLACES_STORE[place_id] = wiki_place
+                lat, lon = wiki_place["lat"], wiki_place["lon"]
+                nearby = []
+                if lat and lon:
+                    raw_nearby = await self.overpass.discover_places(lat=lat, lon=lon, category="all", radius=6000)
+                    if not raw_nearby:
+                        raw_nearby = await self.wikimedia.search_places_near_coords(lat=lat, lon=lon, category="all", radius=6000)
+                    ranked_nearby = self._rank_and_deduplicate_candidates(raw_nearby, lat, lon, "all", max_dist_km=8.0)
+                    nearby_tasks = [self._enrich_place(np, wiki_place["name"]) for np in ranked_nearby if np["id"] != place_id][:4]
+                    nearby_res = await asyncio.gather(*nearby_tasks, return_exceptions=True) if nearby_tasks else []
+                    nearby = [r for r in nearby_res if isinstance(r, dict)]
+                return {"place": wiki_place, "nearby_places": nearby}
+
+        # 3. Try parsing geo_{lat}_{lon}
+        if place_id.startswith("geo_") and len(parts) >= 3:
+            try:
+                g_lat, g_lon = float(parts[1]), float(parts[2])
+                rev = await self.nominatim.reverse_geocode(g_lat, g_lon)
+                disp = rev.get("display_name") if rev else f"Location ({g_lat}, {g_lon})"
+                raw_p = {
+                    "id": place_id,
+                    "provider_id": place_id,
+                    "name": rev.get("name") if rev else "Destination",
+                    "category": "destination",
+                    "address": disp,
+                    "lat": g_lat,
+                    "lon": g_lon,
+                    "phone": None,
+                    "website": None,
+                    "opening_hours": None,
+                    "osm_wikipedia": None,
+                    "osm_wikidata": None,
+                    "osm_image": None,
+                    "tags": ["Destination"]
+                }
+                norm = await self._enrich_place(raw_p, disp)
+                raw_nearby = await self.overpass.discover_places(lat=g_lat, lon=g_lon, category="all", radius=6000)
+                ranked_nearby = self._rank_and_deduplicate_candidates(raw_nearby, g_lat, g_lon, "all", max_dist_km=8.0)
+                nearby_tasks = [self._enrich_place(np, disp) for np in ranked_nearby if np["id"] != place_id][:4]
+                nearby_res = await asyncio.gather(*nearby_tasks, return_exceptions=True) if nearby_tasks else []
+                nearby = [r for r in nearby_res if isinstance(r, dict)]
+                return {"place": norm, "nearby_places": nearby}
+            except Exception:
+                pass
+
+        # 4. Try parsing osm_{type}_{id}
         if len(parts) >= 3 and parts[0] == "osm":
             el_type, el_id = parts[1], parts[2]
             overpass_p = await self.overpass.fetch_entity_by_osm_id(el_type, el_id)
             if overpass_p:
                 norm = await self._enrich_place(overpass_p, overpass_p.get("address", ""))
+                _PLACES_STORE[place_id] = norm
                 raw_nearby = await self.overpass.discover_places(lat=norm["lat"], lon=norm["lon"], category="all", radius=6000)
                 ranked_nearby = self._rank_and_deduplicate_candidates(raw_nearby, norm["lat"], norm["lon"], "all", max_dist_km=8.0)
                 nearby_tasks = [self._enrich_place(np, norm["address"]) for np in ranked_nearby if np["id"] != place_id][:4]
@@ -645,6 +697,7 @@ class ExploreProvider:
                     "tags": []
                 }
                 norm = await self._enrich_place(raw_p, geo["display_name"])
+                _PLACES_STORE[place_id] = norm
                 raw_nearby = await self.overpass.discover_places(lat=geo["lat"], lon=geo["lon"], category="all", radius=6000)
                 ranked_nearby = self._rank_and_deduplicate_candidates(raw_nearby, geo["lat"], geo["lon"], "all", max_dist_km=8.0)
                 nearby_tasks = [self._enrich_place(np, geo["display_name"]) for np in ranked_nearby if np["id"] != place_id][:4]
@@ -652,8 +705,8 @@ class ExploreProvider:
                 nearby = [r for r in nearby_res if isinstance(r, dict)]
                 return {"place": norm, "nearby_places": nearby}
 
-        # 3. Fallback: Geocode place_id as a query
-        clean_name = place_id.replace("osm_", "").replace("_", " ").strip()
+        # 5. Fallback: Geocode place_id as a query
+        clean_name = place_id.replace("osm_", "").replace("wiki_", "").replace("geo_", "").replace("_", " ").strip()
         geo = await self.nominatim.geocode(clean_name)
         if geo:
             raw_p = {
@@ -673,6 +726,7 @@ class ExploreProvider:
                 "tags": []
             }
             norm = await self._enrich_place(raw_p, geo["display_name"])
+            _PLACES_STORE[place_id] = norm
             raw_nearby = await self.overpass.discover_places(lat=geo["lat"], lon=geo["lon"], category="all", radius=6000)
             ranked_nearby = self._rank_and_deduplicate_candidates(raw_nearby, geo["lat"], geo["lon"], "all", max_dist_km=8.0)
             nearby_tasks = [self._enrich_place(np, geo["display_name"]) for np in ranked_nearby if np["id"] != norm["id"]][:4]
