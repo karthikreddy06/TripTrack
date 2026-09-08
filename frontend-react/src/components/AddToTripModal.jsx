@@ -76,11 +76,20 @@ export const AddToTripModal = ({ isOpen = true, onClose, place, onSuccess }) => 
   const [newTripBudget, setNewTripBudget] = useState('2000');
   const [newTripTravelers, setNewTripTravelers] = useState('2');
 
+  const extractStringLocation = (p) => {
+    if (!p) return '';
+    if (typeof p.address === 'string' && p.address.trim()) return p.address.trim();
+    if (typeof p.location === 'string' && p.location.trim()) return p.location.trim();
+    if (p.name) return p.name;
+    return 'Destination';
+  };
+
   useEffect(() => {
     if (place) {
-      const dest = place.location || place.address || place.name || '';
-      setNewTripDestination(dest.split(',')[0].trim());
-      setNewTripTitle(`Journey to ${dest.split(',')[0].trim() || 'New Destination'}`);
+      const locStr = extractStringLocation(place);
+      const cleanDest = locStr.split(',')[0].trim() || 'New Destination';
+      setNewTripDestination(cleanDest);
+      setNewTripTitle(`Journey to ${cleanDest}`);
     }
   }, [place]);
 
@@ -94,12 +103,18 @@ export const AddToTripModal = ({ isOpen = true, onClose, place, onSuccess }) => 
         setTrips(list);
 
         if (list.length > 0) {
-          const matching = place?.location
-            ? list.find(
-                (t) =>
-                  place.location.toLowerCase().includes(t.destination.toLowerCase()) ||
-                  t.destination.toLowerCase().includes(place.location.toLowerCase())
-              )
+          const locStr = typeof place?.location === 'string'
+            ? place.location
+            : (typeof place?.address === 'string' ? place.address : '');
+          const matching = locStr
+            ? list.find((t) => {
+                const tDest = typeof t.destination === 'string' ? t.destination : '';
+                return (
+                  tDest &&
+                  (locStr.toLowerCase().includes(tDest.toLowerCase()) ||
+                   tDest.toLowerCase().includes(locStr.toLowerCase()))
+                );
+              })
             : null;
           setSelectedTripId(matching ? matching._id : list[0]._id);
           setMode('existing');
@@ -114,7 +129,7 @@ export const AddToTripModal = ({ isOpen = true, onClose, place, onSuccess }) => 
     };
 
     fetchUserTrips();
-  }, [isOpen, user?.user_id, place?.location, showError]);
+  }, [isOpen, user?.user_id, place, showError]);
 
   const selectedTrip = trips.find((t) => t._id === selectedTripId);
 
@@ -355,7 +370,7 @@ export const AddToTripModal = ({ isOpen = true, onClose, place, onSuccess }) => 
                 <h4 style={{ margin: 0, fontSize: '1.1rem' }}>{place.name}</h4>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.775rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
                   <MapPin size={11} />
-                  <span>{place.address || place.location}</span>
+                  <span>{extractStringLocation(place)}</span>
                 </div>
               </div>
             </div>

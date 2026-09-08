@@ -40,7 +40,16 @@ export const PlaceDetail = () => {
   const [savingWishlist, setSavingWishlist] = useState(false);
   const [modalPlace, setModalPlace] = useState(null);
 
+  const getDisplayAddress = (p) => {
+    if (!p) return 'Location details available';
+    if (typeof p.address === 'string' && p.address.trim()) return p.address.trim();
+    if (typeof p.location === 'string' && p.location.trim()) return p.location.trim();
+    if (p.name) return p.name;
+    return 'Location details available';
+  };
+
   const fetchPlace = useCallback(async () => {
+    if (!decodedPlaceId) return;
     try {
       setLoading(true);
       setError(null);
@@ -61,8 +70,12 @@ export const PlaceDetail = () => {
   }, [decodedPlaceId, isAuthenticated]);
 
   useEffect(() => {
+    setPlaceData(null);
+    setNearbyPlaces([]);
+    setError(null);
+    setLoading(true);
     fetchPlace();
-  }, [fetchPlace]);
+  }, [decodedPlaceId, fetchPlace]);
 
   const handleToggleWishlist = async () => {
     if (!isAuthenticated) {
@@ -188,7 +201,7 @@ export const PlaceDetail = () => {
   const pId = placeData.id || placeData.place_id || decodedPlaceId;
 
   return (
-    <div className="main-content">
+    <div className="main-content" key={decodedPlaceId}>
       {/* Back button */}
       <Link
         to="/explore"
@@ -269,7 +282,7 @@ export const PlaceDetail = () => {
 
           <div className="place-detail-address" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--text-secondary)', fontSize: '0.92rem', marginBottom: '1rem' }}>
             <MapPin size={15} style={{ color: 'var(--primary-green)' }} />
-            <span>{placeData.address || placeData.location || 'Location details available'}</span>
+            <span>{getDisplayAddress(placeData)}</span>
           </div>
 
           <p className="place-detail-desc" style={{ lineHeight: '1.7', color: 'var(--text-primary)', fontSize: '1rem', maxWidth: '850px' }}>

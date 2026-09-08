@@ -86,8 +86,9 @@ export default function App() {
 
               {/* Explore routes (Accessible to both authenticated and browsing guests) */}
               <Route path="/explore" element={<Explore />} />
-              <Route path="/explore/:destination" element={<DestinationDetail />} />
               <Route path="/explore/place/:placeId" element={<PlaceDetail />} />
+              <Route path="/explore/places/:placeId" element={<PlaceDetail />} />
+              <Route path="/explore/:destination" element={<DestinationDetail />} />
 
               {/* Protected app routes */}
               <Route

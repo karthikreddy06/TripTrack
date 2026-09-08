@@ -133,89 +133,100 @@ export const MapView = ({
     const markersLayer = markersLayerRef.current;
     if (!map || !markersLayer) return;
 
-    markersLayer.clearLayers();
-    markersMapRef.current.clear();
+    try {
+      markersLayer.clearLayers();
+      markersMapRef.current.clear();
 
-    const validPlaces = places
-      .map((p) => ({ place: p, coords: getValidCoordinates(p) }))
-      .filter((item) => item.coords !== null);
+      const validPlaces = (places || [])
+        .map((p) => ({ place: p, coords: getValidCoordinates(p) }))
+        .filter((item) => item.coords !== null);
 
-    if (validPlaces.length === 0) return;
+      if (validPlaces.length === 0) return;
 
-    const bounds = L.latLngBounds();
+      const bounds = L.latLngBounds();
 
-    validPlaces.forEach(({ place, coords }, idx) => {
-      const pId = place.id || place.place_id || place.provider_id || String(idx);
-      const isSelected = selectedPlaceId && (place.id === selectedPlaceId || place.place_id === selectedPlaceId || place.provider_id === selectedPlaceId);
-      const catColor = getCategoryColor(place.category);
+      validPlaces.forEach(({ place, coords }, idx) => {
+        const pId = place.id || place.place_id || place.provider_id || String(idx);
+        const isSelected = selectedPlaceId && (place.id === selectedPlaceId || place.place_id === selectedPlaceId || place.provider_id === selectedPlaceId);
+        const catColor = getCategoryColor(place.category);
 
-      const customIcon = L.divIcon({
-        className: 'custom-osm-div-icon',
-        html: `
-          <div style="
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            width: ${isSelected ? '32px' : '26px'};
-            height: ${isSelected ? '32px' : '26px'};
-            background-color: ${isSelected ? '#1f2b20' : catColor};
-            color: #ffffff;
-            border-radius: 50%;
-            border: 2px solid #ffffff;
-            box-shadow: 0 3px 8px rgba(0,0,0,0.35);
-            font-family: var(--font-mono, monospace);
-            font-size: ${isSelected ? '11px' : '9px'};
-            font-weight: 700;
-            cursor: pointer;
-            transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-          ">
-            ${idx + 1}
+        const customIcon = L.divIcon({
+          className: 'custom-osm-div-icon',
+          html: `
+            <div style="
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              width: ${isSelected ? '32px' : '26px'};
+              height: ${isSelected ? '32px' : '26px'};
+              background-color: ${isSelected ? '#1f2b20' : catColor};
+              color: #ffffff;
+              border-radius: 50%;
+              border: 2px solid #ffffff;
+              box-shadow: 0 3px 8px rgba(0,0,0,0.35);
+              font-family: var(--font-mono, monospace);
+              font-size: ${isSelected ? '11px' : '9px'};
+              font-weight: 700;
+              cursor: pointer;
+              transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+            ">
+              ${idx + 1}
+            </div>
+          `,
+          iconSize: [isSelected ? 32 : 26, isSelected ? 32 : 26],
+          iconAnchor: [isSelected ? 16 : 13, isSelected ? 16 : 13],
+          popupAnchor: [0, isSelected ? -16 : -13],
+        });
+
+        const marker = L.marker([coords.lat, coords.lon], { icon: customIcon });
+
+        const displayAddr = typeof place.address === 'string' && place.address
+          ? place.address
+          : (typeof place.location === 'string' ? place.location : '');
+
+        const popupHtml = `
+          <div style="font-family: inherit; padding: 2px; max-width: 220px;">
+            <span style="font-size: 9px; text-transform: uppercase; font-weight: 700; color: ${catColor}; letter-spacing: 0.05em;">
+              ${place.category?.toUpperCase() || 'PLACE'}
+            </span>
+            <h4 style="margin: 4px 0 2px 0; font-size: 13px; font-weight: 600; color: #1f2b20;">
+              ${place.name || 'Place'}
+            </h4>
+            <p style="margin: 0; font-size: 11px; color: #64748b; line-height: 1.3;">
+              ${displayAddr}
+            </p>
           </div>
-        `,
-        iconSize: [isSelected ? 32 : 26, isSelected ? 32 : 26],
-        iconAnchor: [isSelected ? 16 : 13, isSelected ? 16 : 13],
-        popupAnchor: [0, isSelected ? -16 : -13],
-      });
+        `;
 
-      const marker = L.marker([coords.lat, coords.lon], { icon: customIcon });
+        marker.bindPopup(popupHtml, { closeButton: false, offset: [0, -10] });
 
-      const popupHtml = `
-        <div style="font-family: inherit; padding: 2px; max-width: 220px;">
-          <span style="font-size: 9px; text-transform: uppercase; font-weight: 700; color: ${catColor}; letter-spacing: 0.05em;">
-            ${place.category?.toUpperCase() || 'PLACE'}
-          </span>
-          <h4 style="margin: 4px 0 2px 0; font-size: 13px; font-weight: 600; color: #1f2b20;">
-            ${place.name}
-          </h4>
-          <p style="margin: 0; font-size: 11px; color: #64748b; line-height: 1.3;">
-            ${place.address || place.location || ''}
-          </p>
-        </div>
-      `;
+        marker.on('click', () => {
+          if (onSelectPlace) {
+            onSelectPlace(place);
+          }
+        });
 
-      marker.bindPopup(popupHtml, { closeButton: false, offset: [0, -10] });
+        markersLayer.addLayer(marker);
+        markersMapRef.current.set(pId, marker);
+        bounds.extend([coords.lat, coords.lon]);
 
-      marker.on('click', () => {
-        if (onSelectPlace) {
-          onSelectPlace(place);
+        if (isSelected) {
+          marker.openPopup();
         }
       });
 
-      markersLayer.addLayer(marker);
-      markersMapRef.current.set(pId, marker);
-      bounds.extend([coords.lat, coords.lon]);
-
-      if (isSelected) {
-        marker.openPopup();
+      if (bounds.isValid()) {
+        const size = map.getSize();
+        if (size && size.x > 0 && size.y > 0) {
+          map.fitBounds(bounds, {
+            padding: [45, 45],
+            maxZoom: 15,
+            animate: false,
+          });
+        }
       }
-    });
-
-    if (bounds.isValid()) {
-      map.fitBounds(bounds, {
-        padding: [45, 45],
-        maxZoom: 15,
-        animate: true,
-      });
+    } catch (err) {
+      console.warn('MapView updateMarkers caught non-fatal error:', err);
     }
   }, [places, selectedPlaceId, onSelectPlace]);
 
@@ -223,26 +234,53 @@ export const MapView = ({
     updateMarkers();
   }, [updateMarkers]);
 
+  // Handle center / zoom prop changes
+  useEffect(() => {
+    if (!mapInstanceRef.current || !center) return;
+    try {
+      const cLat = Array.isArray(center) ? center[0] : (center?.lat ?? 17.3850);
+      const cLng = Array.isArray(center) ? center[1] : (center?.lng ?? center?.lon ?? 78.4867);
+      if (typeof cLat === 'number' && typeof cLng === 'number' && !isNaN(cLat) && !isNaN(cLng)) {
+        mapInstanceRef.current.setView([cLat, cLng], zoom || 12, { animate: false });
+      }
+    } catch {
+      // ignore
+    }
+  }, [center, zoom]);
+
   // Selected Place focus effect
   useEffect(() => {
     if (!selectedPlaceId || !mapInstanceRef.current) return;
 
-    const target = places.find(
-      (p) => p.id === selectedPlaceId || p.place_id === selectedPlaceId || p.provider_id === selectedPlaceId
-    );
-    const coords = getValidCoordinates(target);
+    try {
+      const target = (places || []).find(
+        (p) => p && (p.id === selectedPlaceId || p.place_id === selectedPlaceId || p.provider_id === selectedPlaceId)
+      );
+      const coords = getValidCoordinates(target);
 
-    if (coords) {
-      mapInstanceRef.current.setView([coords.lat, coords.lon], Math.max(mapInstanceRef.current.getZoom(), 14), {
-        animate: true,
-        duration: 0.8,
-      });
+      if (coords && mapInstanceRef.current) {
+        let targetZoom = 14;
+        try {
+          const currentZoom = mapInstanceRef.current.getZoom();
+          if (typeof currentZoom === 'number' && !isNaN(currentZoom)) {
+            targetZoom = Math.max(currentZoom, 14);
+          }
+        } catch {
+          targetZoom = 14;
+        }
 
-      const pId = target.id || target.place_id || target.provider_id;
-      const marker = markersMapRef.current.get(pId);
-      if (marker) {
-        marker.openPopup();
+        mapInstanceRef.current.setView([coords.lat, coords.lon], targetZoom, {
+          animate: false,
+        });
+
+        const pId = target.id || target.place_id || target.provider_id;
+        const marker = markersMapRef.current.get(pId);
+        if (marker) {
+          marker.openPopup();
+        }
       }
+    } catch (focusErr) {
+      console.warn('MapView selectedPlace error:', focusErr);
     }
   }, [selectedPlaceId, places]);
 

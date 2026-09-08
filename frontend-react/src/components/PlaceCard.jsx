@@ -115,11 +115,13 @@ export const PlaceCard = ({
     });
   };
 
-  const detailUrl = place.category === 'destination'
-    ? `/explore/${encodeURIComponent(place.name.toLowerCase())}`
-    : `/explore/place/${encodeURIComponent(placeId)}`;
+  const cleanPlaceName = place?.name ? place.name.trim() : 'Place';
+  const cleanPlaceId = (placeId || '').replace(/\//g, '_');
+  const detailUrl = (place?.category === 'destination' && place?.name)
+    ? `/explore/${encodeURIComponent(cleanPlaceName.toLowerCase())}`
+    : `/explore/place/${encodeURIComponent(cleanPlaceId || placeId)}`;
 
-  const displayDist = anchorDistanceKm ?? place.distance_km;
+  const displayDist = anchorDistanceKm ?? place?.distance_km;
 
   return (
     <div

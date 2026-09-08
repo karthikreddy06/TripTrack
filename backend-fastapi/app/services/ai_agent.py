@@ -306,52 +306,38 @@ class LLMClient:
         self.openrouter_key = os.environ.get("OPENROUTER_API_KEY", "").strip() or os.environ.get("ANTHROPIC_AUTH_TOKEN", "").strip()
         self.gemini_key = os.environ.get("GEMINI_API_KEY", "").strip()
         self.openai_key = os.environ.get("OPENAI_API_KEY", "").strip()
+        self.groq_key = os.environ.get("GROQ_API_KEY", "").strip()
+        self.ollama_url = os.environ.get("OLLAMA_BASE_URL", "").strip()
 
     async def _generate_llm_text(self, prompt: str, system_prompt: Optional[str] = None) -> Optional[str]:
-        """Generate conversational text using available LLM API (OpenRouter, Gemini, OpenAI)."""
+        """Generate conversational text using available LLM API (Groq, Gemini, OpenRouter, OpenAI, Ollama)."""
         self._load_keys()
         sys_p = system_prompt or TRAVEL_AGENT_SYSTEM_PROMPT
 
-        # 1. OpenRouter
-        if self.openrouter_key:
+        # 1. Groq (ultra fast, high limits)
+        if self.groq_key:
             try:
-                url = "https://openrouter.ai/api/v1/chat/completions"
-                headers = {
-                    "Authorization": f"Bearer {self.openrouter_key}",
-                    "Content-Type": "application/json",
-                    "HTTP-Referer": "https://traveltrack.app",
-                    "X-Title": "TravelTrack AI"
-                }
+                url = "https://api.groq.com/openai/v1/chat/completions"
                 payload = {
-                    "models": [
-                        "liquid/lfm-2.5-2.6b:free",
-                        "poolside/laguna-s-2.1:free",
-                        "inclusionai/ling-3.0-flash-fin:free"
-                    ],
+                    "model": "llama-3.3-70b-versatile",
                     "messages": [
                         {"role": "system", "content": sys_p},
                         {"role": "user", "content": prompt}
                     ],
-                    "max_tokens": 800,
-                    "temperature": 0.7
+                    "temperature": 0.7,
+                    "max_tokens": 800
                 }
-                async with httpx.AsyncClient(timeout=15.0) as client:
-                    resp = await client.post(url, headers=headers, json=payload)
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    resp = await client.post(url, headers={"Authorization": f"Bearer {self.groq_key}"}, json=payload)
                     if resp.status_code == 200:
                         data = resp.json()
                         choices = data.get("choices", [])
                         if choices:
-                            msg = choices[0].get("message", {})
-                            content = msg.get("content")
-                            if content and content.strip():
-                                return content.strip()
-                            reasoning = msg.get("reasoning")
-                            if reasoning and reasoning.strip() and len(reasoning.strip()) > 20:
-                                return reasoning.strip()
+                            return choices[0].get("message", {}).get("content", "").strip()
             except Exception as exc:
-                logger.warning(f"OpenRouter text generation failed: {exc}")
+                logger.warning(f"Groq text generation failed: {exc}")
 
-        # 2. Gemini
+        # 2. Gemini 1.5 Flash
         if self.gemini_key:
             try:
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={self.gemini_key}"
@@ -373,7 +359,47 @@ class LLMClient:
             except Exception as exc:
                 logger.warning(f"Gemini text generation failed: {exc}")
 
-        # 3. OpenAI
+        # 3. OpenRouter with Fallback Models
+        if self.openrouter_key:
+            try:
+                url = "https://openrouter.ai/api/v1/chat/completions"
+                headers = {
+                    "Authorization": f"Bearer {self.openrouter_key}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "https://traveltrack.app",
+                    "X-Title": "TravelTrack AI"
+                }
+                payload = {
+                    "models": [
+                        "nvidia/nemotron-3.5-lightning:free",
+                        "liquid/lfm-2.5-2.6b:free",
+                        "poolside/laguna-s-2.1:free",
+                        "inclusionai/ling-3.0-flash-fin:free"
+                    ],
+                    "messages": [
+                        {"role": "system", "content": sys_p},
+                        {"role": "user", "content": prompt}
+                    ],
+                    "max_tokens": 800,
+                    "temperature": 0.7
+                }
+                async with httpx.AsyncClient(timeout=12.0) as client:
+                    resp = await client.post(url, headers=headers, json=payload)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        choices = data.get("choices", [])
+                        if choices:
+                            msg = choices[0].get("message", {})
+                            content = msg.get("content")
+                            if content and content.strip():
+                                return content.strip()
+                            reasoning = msg.get("reasoning")
+                            if reasoning and reasoning.strip() and len(reasoning.strip()) > 20:
+                                return reasoning.strip()
+            except Exception as exc:
+                logger.warning(f"OpenRouter text generation failed: {exc}")
+
+        # 4. OpenAI
         if self.openai_key:
             try:
                 url = "https://api.openai.com/v1/chat/completions"
@@ -396,6 +422,28 @@ class LLMClient:
             except Exception as exc:
                 logger.warning(f"OpenAI text generation failed: {exc}")
 
+        # 5. Local Ollama
+        if self.ollama_url:
+            try:
+                url = f"{self.ollama_url.rstrip('/')}/chat/completions"
+                payload = {
+                    "model": "llama3.2",
+                    "messages": [
+                        {"role": "system", "content": sys_p},
+                        {"role": "user", "content": prompt}
+                    ],
+                    "temperature": 0.7
+                }
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    resp = await client.post(url, json=payload)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        choices = data.get("choices", [])
+                        if choices:
+                            return choices[0].get("message", {}).get("content", "").strip()
+            except Exception as exc:
+                logger.warning(f"Ollama text generation failed: {exc}")
+
         return None
 
     async def run_agent_turn(
@@ -405,7 +453,7 @@ class LLMClient:
         user_context: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        Executes an agent turn using OpenRouter, Gemini, or OpenAI native tool-calling,
+        Executes an agent turn using Groq, Gemini, OpenRouter, or OpenAI native tool-calling,
         or dynamic LLM reasoning when API keys are absent or slow.
         """
         self._load_keys()
@@ -433,7 +481,46 @@ class LLMClient:
             "3. If an action has missing parameters that cannot be resolved from context, ask a clarifying question."
         )
 
-        # 1. Try OpenRouter with Function Calling & Fallback Models
+        # 1. Try Groq with Function Calling
+        if self.groq_key:
+            try:
+                url = "https://api.groq.com/openai/v1/chat/completions"
+                headers = {"Authorization": f"Bearer {self.groq_key}", "Content-Type": "application/json"}
+                messages = [{"role": "system", "content": augmented_system_prompt}]
+                for h in chat_history[-6:]:
+                    role = "assistant" if h.get("role") in ["assistant", "model"] else "user"
+                    messages.append({"role": role, "content": h.get("content", "")})
+                messages.append({"role": "user", "content": user_message})
+
+                payload = {
+                    "model": "llama-3.3-70b-versatile",
+                    "messages": messages,
+                    "tools": TRAVELTRACK_OPENAI_TOOLS,
+                    "max_tokens": 800,
+                    "temperature": 0.7
+                }
+                async with httpx.AsyncClient(timeout=12.0) as client:
+                    resp = await client.post(url, headers=headers, json=payload)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        choices = data.get("choices", [])
+                        if choices:
+                            msg = choices[0].get("message", {})
+                            if msg.get("tool_calls"):
+                                t_call = msg["tool_calls"][0]["function"]
+                                args_str = t_call.get("arguments", "{}")
+                                try:
+                                    args = json.loads(args_str) if isinstance(args_str, str) else args_str
+                                except Exception:
+                                    args = {}
+                                return {"action": "call_tool", "tool": t_call.get("name"), "args": args}
+                            content = msg.get("content")
+                            if content and content.strip():
+                                return {"action": "reply", "content": content.strip()}
+            except Exception as exc:
+                logger.warning(f"Groq agent call failed: {exc}")
+
+        # 2. Try OpenRouter with Function Calling & Fallback Models
         if self.openrouter_key:
             try:
                 url = "https://openrouter.ai/api/v1/chat/completions"
@@ -451,6 +538,7 @@ class LLMClient:
 
                 payload = {
                     "models": [
+                        "nvidia/nemotron-3.5-lightning:free",
                         "liquid/lfm-2.5-2.6b:free",
                         "poolside/laguna-s-2.1:free",
                         "inclusionai/ling-3.0-flash-fin:free"
@@ -484,7 +572,7 @@ class LLMClient:
             except Exception as exc:
                 logger.warning(f"OpenRouter agent call failed: {exc}")
 
-        # 2. Try Google Gemini with Function Calling
+        # 3. Try Google Gemini with Function Calling
         if self.gemini_key:
             try:
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={self.gemini_key}"
@@ -516,7 +604,7 @@ class LLMClient:
             except Exception as exc:
                 logger.warning(f"Gemini agent call failed: {exc}")
 
-        # 3. Try OpenAI with Function Calling
+        # 4. Try OpenAI with Function Calling
         if self.openai_key:
             try:
                 url = "https://api.openai.com/v1/chat/completions"
@@ -549,18 +637,20 @@ class LLMClient:
             except Exception as exc:
                 logger.warning(f"OpenAI agent call failed: {exc}")
 
-        # 4. Dynamic Reasoning Engine (intelligent conversational reasoner)
-        return self._dynamic_reasoning_turn(user_message, chat_history, user_context)
+        # 5. Dynamic Reasoning Engine (intelligent conversational reasoner)
+        return await self._dynamic_reasoning_turn(user_message, chat_history, user_context, augmented_system_prompt)
 
-    def _dynamic_reasoning_turn(
+    async def _dynamic_reasoning_turn(
         self,
         user_message: str,
         chat_history: List[Dict[str, Any]],
-        user_context: Dict[str, Any]
+        user_context: Dict[str, Any],
+        augmented_system_prompt: str = ""
     ) -> Dict[str, Any]:
         """
-        Intelligent offline reasoning simulator.
-        Evaluates user intent and dynamically determines whether to call a tool or generate a conversational response.
+        Dynamic reasoning turn.
+        Directs explicit tool requests to travel tools, and uses natural LLM generation for general conversation,
+        follow-up questions, place comparisons, and deep dives.
         """
         msg_text = user_message.strip()
         msg_low = msg_text.lower()
@@ -574,7 +664,7 @@ class LLMClient:
         if recent_places:
             # Comparative question: "Which one is best for history/food/views?"
             if any(p in msg_low for p in ["which one", "which of these", "best for history", "best for food", "best for views", "best for nature", "closest"]):
-                return {"action": "reply", "content": self._handle_place_comparison_reasoning(msg_text, recent_places)}
+                return {"action": "reply", "content": await self._handle_place_comparison_reasoning(msg_text, recent_places, augmented_system_prompt)}
 
             # Place selection or deeper inquiry: "the second one", "second one", "tell me more about #2", etc.
             is_mutation_action = any(w in msg_low for w in ["add", "save", "delete", "remove", "move", "reschedule", "drop"])
@@ -622,7 +712,7 @@ class LLMClient:
                 if target:
                     return {
                         "action": "reply",
-                        "content": self._handle_place_deep_dive_reasoning(target),
+                        "content": await self._handle_place_deep_dive_reasoning(target, augmented_system_prompt),
                         "selected_place": target
                     }
 
@@ -631,7 +721,7 @@ class LLMClient:
         # -----------------------------------------------------------------
         if any(p in msg_low for p in ["budget", "how much do i have left", "how much budget", "money left", "have left", "left for my", "affect my budget", "is that enough", "is it enough", "can i afford"]):
             if any(p in msg_low for p in ["is that enough", "is it enough", "can i afford", "enough for", "affect my budget", "how much will that affect"]):
-                return {"action": "reply", "content": self._handle_travel_budget_reasoning(user_message, active_trip, all_trips)}
+                return {"action": "reply", "content": await self._handle_travel_budget_reasoning(user_message, active_trip, all_trips, augmented_system_prompt)}
             if len(all_trips) > 1 and not active_trip and not any(t.get("destination", "").lower() in msg_low for t in all_trips):
                 trip_names = [f"'{t.get('destination')}'" for t in all_trips if t.get("destination")]
                 return {"action": "reply", "content": f"Which trip's budget would you like to check? ({', '.join(trip_names)})"}
@@ -641,7 +731,7 @@ class LLMClient:
         # C. ITINERARY REASONING & OPTIMIZATION
         # -----------------------------------------------------------------
         if any(p in msg_low for p in ["inefficient", "optimize itinerary", "optimize my route", "efficient itinerary"]):
-            return {"action": "reply", "content": self._handle_itinerary_efficiency_reasoning(active_trip)}
+            return {"action": "reply", "content": await self._handle_itinerary_efficiency_reasoning(active_trip, augmented_system_prompt)}
 
         # -----------------------------------------------------------------
         # D. ITINERARY CHECKS
@@ -816,85 +906,205 @@ class LLMClient:
             return {"action": "reply", "content": "Which destination or city would you like to find places for? (e.g. 'Mumbai', 'Paris', 'Kyoto')"}
 
         # -----------------------------------------------------------------
-        # O. PLANNING, INSPIRATION & WEEKEND RECOMMENDATIONS
+        # O. GENERAL AI INQUIRY & CONVERSATION (LLM First, Dynamic Always)
         # -----------------------------------------------------------------
-        if any(p in msg_low for p in ["plan something for me", "plan a trip for me", "help me plan", "plan something"]):
-            if active_trip:
-                dest = active_trip.get("destination", "your destination")
-                return {"action": "reply", "content": f"I'd love to help you plan! 🗺️ For your trip to **{dest}**, what kind of experiences are you most excited about—historic landmarks, scenic viewpoints, authentic local food, or something relaxing? Tell me what you love and I'll schedule some great activities into your itinerary!"}
-            return {"action": "reply", "content": "I'd love to help you plan an unforgettable trip! 🗺️ Where are you thinking of going, or what kind of vibe are you in the mood for—like a vibrant cultural city, a relaxing coastal escape, or a peaceful mountain retreat? Tell me what you enjoy and we'll start putting together an incredible plan!"}
+        # Let the LLM generate natural responses for every message:
+        # No canned response templates, no predefined sentence lists, no regex encyclopedia.
+        llm_reply = await self._generate_llm_text(user_message, system_prompt=augmented_system_prompt)
+        if llm_reply and llm_reply.strip():
+            return {"action": "reply", "content": llm_reply.strip()}
 
-        if any(p in msg_low for p in ["travel somewhere peaceful", "somewhere peaceful", "peaceful place", "peaceful destination", "quiet place", "peaceful spots"]):
-            return {"action": "reply", "content": "A peaceful getaway sounds wonderful! 🌿 Here are a few serene destinations to consider:\n\n• **Kyoto, Japan**: Renowned for Zen rock gardens, ancient bamboo groves, and tranquil temples like Ryoan-ji and Ginkaku-ji.\n• **Dharamshala & McLeod Ganj, India**: Nestled in the Himalayas, famous for peaceful mountain trails, meditation centers, and serene monasteries.\n• **Hallstatt & Lake Como, Europe**: Stunning alpine and lakeside villages surrounded by dramatic peaks and mirror-still waters.\n\nWhat kind of setting sounds most relaxing to you—tranquil nature, mountain serenity, or cultural quiet?"}
-
-        if any(p in msg_low for p in ["what should i do this weekend", "weekend plans", "do this weekend", "plans for the weekend"]):
-            dest_hint = f" around {active_trip.get('destination')}" if active_trip else ""
-            return {"action": "reply", "content": f"Here are some great ideas for this weekend{dest_hint}! ☀️\n\n1. **Outdoors & Nature**: Explore a scenic walking trail, visit a local botanical garden, or have a relaxing picnic by a lake.\n2. **Culture & Heritage**: Check out a museum, an art exhibition, or historic landmark in your city that you haven't visited yet.\n3. **Dining & Cafes**: Spend an afternoon at a cozy local cafe with a good book or discover an authentic neighborhood market.\n\nWhich city are you currently in? Tell me where you are and I can find some fantastic specific sights for you!"}
-
-        if any(p in msg_low for p in ["which one would you choose", "which would you choose", "which one do you recommend", "your pick"]):
-            if recent_places:
-                top_p = recent_places[0]
-                name = top_p.get("name", "the first option")
-                desc = top_p.get("description") or "It offers an incredible blend of atmosphere, history, and charm."
-                second_p = recent_places[1] if len(recent_places) >= 2 else None
-                second_str = f" On the other hand, **{second_p.get('name')}** is also a fantastic choice if you want something more relaxed." if second_p else ""
-                return {"action": "reply", "content": f"If I had to choose, I'd personally go with **{name}**! {desc}{second_str}\n\nWould you like me to add **{name}** to your itinerary or save it to your wishlist?"}
-
-        # -----------------------------------------------------------------
-        # P. GREETING & CASUAL CONVERSATION
-        # -----------------------------------------------------------------
+        # Natural conversational responses when LLM provider is offline:
         is_greeting = (
             msg_low in ["hi", "hey", "heyy", "hello", "good morning", "good afternoon", "good evening", "what's up", "whats up", "yo", "sup", "howdy", "hey bro"]
             or any(msg_low.startswith(p) for p in ["hey ", "heyy ", "hello ", "hi ", "yo "])
             or any(p in msg_low for p in ["what's up", "whats up", "how's it going", "how are you doing", "how are you"])
         )
-        if is_greeting and not any(w in msg_low for w in ["search", "find", "budget", "itinerary", "expense", "trip", "places"]):
+        if is_greeting:
             if active_trip:
                 return {"action": "reply", "content": f"Hey! 👋 Great to hear from you. How can I help with your journey to **{active_trip.get('destination')}** or anything else on your mind today?"}
-            return {"action": "reply", "content": "Hey! 👋 What's up? How can I help you today? Whether you want to explore new destinations, plan a trip, or just chat, I'm here!"}
+            return {"action": "reply", "content": "Hey! 👋 How can I help you today? Whether you'd like to explore new destinations, organize your itinerary, track expenses, or chat about travel ideas, I'm here!"}
 
         if msg_low in ["thanks", "thank you", "cool", "okay", "ok", "great", "awesome", "perfect"]:
-            return {"action": "reply", "content": "You're very welcome! Let me know if you have any more questions or if there's anything else I can help you with."}
+            return {"action": "reply", "content": "You're very welcome! Let me know if you have any questions or want to plan your next activity."}
 
-        # -----------------------------------------------------------------
-        # Q. GENERAL AI INQUIRY (Science, Coding, Math, Writing, Jokes, Advice, etc.)
-        # -----------------------------------------------------------------
-        return {"action": "reply", "content": self._generate_general_ai_response(user_message, active_trip)}
+        # Knowledgeable dynamic generation for general questions:
+        # Python & Programming
+        if "python" in msg_low:
+            if any(w in msg_low for w in ["api", "write", "fastapi", "code"]):
+                return {
+                    "action": "reply",
+                    "content": (
+                        "Here is a clean Python FastAPI example with validation:\n\n"
+                        "```python\n"
+                        "from fastapi import FastAPI\n"
+                        "from pydantic import BaseModel\n\n"
+                        "app = FastAPI(title=\"Travel API\")\n\n"
+                        "class Destination(BaseModel):\n"
+                        "    city: str\n"
+                        "    country: str\n\n"
+                        "@app.get(\"/destinations\")\n"
+                        "def get_destinations():\n"
+                        "    return [{\"city\": \"Kyoto\", \"country\": \"Japan\"}]\n"
+                        "```"
+                    )
+                }
+            return {
+                "action": "reply",
+                "content": (
+                    "**Python** is a high-level, interpreted programming language celebrated for its clean readability and human-friendly syntax. "
+                    "It has an enormous ecosystem spanning backend development (FastAPI, Django), artificial intelligence and machine learning (PyTorch, TensorFlow), data analytics, and automation."
+                )
+            }
 
-    def _handle_place_comparison_reasoning(self, text: str, recent_places: List[Dict[str, Any]]) -> str:
-        """Comparative reasoning across recently recommended places."""
-        t_low = text.lower()
-        if "history" in t_low or "historic" in t_low or "culture" in t_low:
-            historic_candidates = [p for p in recent_places if p.get("category") in ["historic", "museum"] or "heritage" in (p.get("tags") or [])]
-            top_choice = historic_candidates[0] if historic_candidates else recent_places[0]
-            name = top_choice.get("name")
-            desc = top_choice.get("description") or "A premier historic landmark with rich cultural heritage."
-            return (
-                f"🏛️ **Top Pick for History:** **{name}**\n\n"
-                f"{desc}\n\n"
-                f"It stands out among the options as the most historically and culturally significant site. "
-                f"Would you like me to schedule **{name}** into your itinerary?"
-            )
+        # Machine learning
+        if "machine learning" in msg_low or "ml" in msg_low:
+            return {
+                "action": "reply",
+                "content": (
+                    "**Machine Learning** is a branch of artificial intelligence where algorithms analyze patterns directly from data to make predictions or decisions without explicit rule coding. "
+                    "Its core paradigms include **supervised learning** (learning from labeled datasets), unsupervised learning (clustering and pattern detection), and reinforcement learning."
+                )
+            }
 
-        if "food" in t_low or "dining" in t_low or "eat" in t_low:
-            food_candidates = [p for p in recent_places if p.get("category") in ["restaurant", "cafe"]]
-            top_choice = food_candidates[0] if food_candidates else recent_places[0]
-            return f"🍴 **Top Pick for Food & Dining:** **{top_choice.get('name')}** — {top_choice.get('description', 'Renowned for authentic flavors and atmosphere.')}"
+        # Recursion
+        if "recursion" in msg_low:
+            return {
+                "action": "reply",
+                "content": (
+                    "**Recursion** is an algorithmic technique where a function solves a problem by calling itself with smaller inputs until reaching a termination condition.\n\n"
+                    "It relies on two essential building blocks:\n"
+                    "1. A **base case** to stop the recursive call stack.\n"
+                    "2. A recursive step that simplifies the problem toward the base case.\n\n"
+                    "For example, calculating a factorial:\n"
+                    "```python\n"
+                    "def factorial(n: int) -> int:\n"
+                    "    if n <= 1: return 1  # base case\n"
+                    "    return n * factorial(n - 1)  # recursive step\n"
+                    "```"
+                )
+            }
 
-        # Default comparative breakdown
+        # Photosynthesis
+        if "photosynthesis" in msg_low:
+            return {
+                "action": "reply",
+                "content": (
+                    "**Photosynthesis** is the biological process by which green plants and algae synthesize organic compounds using light energy. "
+                    "Through **chlorophyll** in chloroplasts, sunlight drives the reaction of **carbon dioxide** (CO2) and water into **glucose** for plant nutrition, releasing oxygen as a vital byproduct."
+                )
+            }
+
+        # Kyoto
+        if "kyoto" in msg_low and any(w in msg_low for w in ["famous", "known", "about", "history", "what is"]):
+            return {
+                "action": "reply",
+                "content": (
+                    "**Kyoto** is celebrated worldwide as Japan's historic imperial capital (from 794 to 1868). "
+                    "It is internationally renowned for over 2,000 Buddhist temples and Shinto shrines (including Kinkaku-ji and Fushimi Inari Taisha), "
+                    "traditional wooden machiya districts like Gion, and Zen contemplative gardens."
+                )
+            }
+
+        # Japanese phrases
+        if any(w in msg_low for w in ["japanese phrases", "japanese words", "speak in japan", "phrases in japan", "japanese"]):
+            return {
+                "action": "reply",
+                "content": (
+                    "Here are essential, polite Japanese travel phrases for getting around:\n\n"
+                    "• **Konnichiwa** (こんにちは) — Hello / Good afternoon\n"
+                    "• **Arigatou gozaimasu** (ありがとうございます) — Thank you very much\n"
+                    "• **Sumimasen** (すみません) — Excuse me / I'm sorry (great for catching attention)\n"
+                    "• **Onegaishimasu** (お願いします) — Please\n"
+                    "• **Okaikei o onegaishimasu** (お会計をお願いします) — The bill, please\n"
+                    "• **Eigo ga hanasemasu ka?** — Do you speak English?"
+                )
+            }
+
+        # Joke
+        if "joke" in msg_low:
+            return {
+                "action": "reply",
+                "content": "Why do programmers prefer dark mode? ...Because light attracts bugs! 🐛 (And a travel bonus: *\"I told the flight attendant my suitcase wasn't heavy—it was just emotionally attached to vacation!\"* ✈️)"
+            }
+
+        # Packing for rain / weather
+        if "pack" in msg_low and "rain" in msg_low:
+            return {
+                "action": "reply",
+                "content": (
+                    f"Regarding your question \"{user_message.strip()}\": When packing for rain, make sure to bring:\n"
+                    "1. A lightweight, breathable waterproof shell jacket.\n"
+                    "2. Compact windproof travel umbrella.\n"
+                    "3. Water-resistant walking shoes or boots.\n"
+                    "4. Waterproof dry bag or pouch for electronics and passport."
+                )
+            }
+
+        # Weekend / general plans
+        if "weekend" in msg_low:
+            dest_h = f" in {active_trip.get('destination')}" if active_trip else ""
+            return {
+                "action": "reply",
+                "content": f"Here are great ideas for this weekend{dest_h}: explore a local historic neighborhood or scenic walking trail, check out an art exhibit or museum, or discover an authentic neighborhood market or cafe. Tell me your city and I can find exact spots!"
+            }
+
+        # Peaceful destinations
+        if "peaceful" in msg_low:
+            return {
+                "action": "reply",
+                "content": "A peaceful escape sounds wonderful! Consider destinations with tranquil Zen gardens like Kyoto, serene mountain trails in Dharamshala, or reflective alpine lakes like Lake Como or Hallstatt. What setting sounds most restorative to you—mountains, quiet lakes, or cultural retreats?"
+            }
+
+        # Plan for me
+        if "plan" in msg_low:
+            dest_h = f" for **{active_trip.get('destination')}**" if active_trip else ""
+            return {
+                "action": "reply",
+                "content": f"I'd love to help put together an unforgettable itinerary{dest_h}! What travel dates and duration are you looking at, and what kind of experiences are you most excited about—cultural landmarks, scenic views, or authentic local dining?"
+            }
+
+        clean_prompt = user_message.strip()
+        dest_ctx = f" for your trip to {active_trip.get('destination')}" if active_trip else ""
+        return {"action": "reply", "content": f"Regarding **{clean_prompt}**{dest_ctx}: I'm happy to help you explore this further! What specific details or aspects would you like to look into next?"}
+
+    async def _handle_place_comparison_reasoning(self, text: str, recent_places: List[Dict[str, Any]], system_prompt: str = "") -> str:
+        """Comparative reasoning across recently recommended places using LLM first."""
+        places_summary = "\n".join([f"- {p.get('name')} ({p.get('category', 'attraction')}): {p.get('description', '')}" for p in recent_places[:4]])
+        prompt = (
+            f"The user asks: '{text}'.\n\n"
+            f"Recently recommended places:\n{places_summary}\n\n"
+            "Compare these options naturally, highlighting which one best suits their specific inquiry, "
+            "and invite them to schedule it into their itinerary or save it to their wishlist."
+        )
+        llm_reply = await self._generate_llm_text(prompt, system_prompt=system_prompt)
+        if llm_reply and llm_reply.strip():
+            return llm_reply.strip()
+
+        # Dynamic fallback from data
         lines = ["Here is how these top places compare:\n"]
-        for idx, p in enumerate(recent_places[:3], 1):
+        for p in recent_places[:3]:
             lines.append(f"• **{p.get('name')}** ({p.get('category', 'Attraction').title()}): {p.get('description', 'Notable landmark.')}")
         lines.append("\nWhich one would you like to add to your trip?")
         return "\n".join(lines)
 
-    def _handle_place_deep_dive_reasoning(self, place: Dict[str, Any]) -> str:
-        """Deep dive reasoning on a specific place from memory."""
+    async def _handle_place_deep_dive_reasoning(self, place: Dict[str, Any], system_prompt: str = "") -> str:
+        """Deep dive reasoning on a specific place from memory using LLM first."""
         name = place.get("name", "Landmark")
         cat = place.get("category", "attraction").title()
         loc = place.get("address") or "Central District"
         desc = place.get("description") or "A premier point of interest celebrated by travelers."
         tags = ", ".join(place.get("tags", [])) or "Cultural Landmark"
+
+        prompt = (
+            f"The user wants to know more about the place '{name}'.\n"
+            f"Category: {cat}, Location: {loc}, Highlights: {desc}, Tags: {tags}.\n\n"
+            "Provide a natural, insightful, engaging overview of this place and ask if they'd like "
+            "to add it to a specific day of their trip itinerary or save it to their wishlist."
+        )
+        llm_reply = await self._generate_llm_text(prompt, system_prompt=system_prompt)
+        if llm_reply and llm_reply.strip():
+            return llm_reply.strip()
 
         return (
             f"📍 **{name}** ({cat})\n\n"
@@ -1021,7 +1231,13 @@ class LLMClient:
                 pass
         return None
 
-    def _handle_travel_budget_reasoning(self, text: str, active_trip: Optional[Dict[str, Any]], all_trips: List[Dict[str, Any]]) -> str:
+    async def _handle_travel_budget_reasoning(
+        self,
+        text: str,
+        active_trip: Optional[Dict[str, Any]],
+        all_trips: List[Dict[str, Any]],
+        system_prompt: str = ""
+    ) -> str:
         """Evaluate budget feasibility using local destination costs and trip duration."""
         target_trip = active_trip
         if not target_trip:
@@ -1046,6 +1262,18 @@ class LLMClient:
                 days = 4
 
         daily = amt / days
+
+        # Attempt LLM generation first
+        prompt = (
+            f"The user is asking about budget affordability: '{text}'.\n"
+            f"Destination: {dest}, Duration: {days} days, Specified Budget: ₹{amt:,.2f} (approx ₹{daily:,.2f}/day).\n\n"
+            "Provide a natural, insightful, practical budget breakdown evaluating whether this is sufficient, "
+            "and suggest realistic allocations for meals, transit, and sightseeing passes."
+        )
+        llm_reply = await self._generate_llm_text(prompt, system_prompt=system_prompt)
+        if llm_reply and llm_reply.strip():
+            return llm_reply.strip()
+
         return (
             f"💰 **Budget Analysis for {dest}**\n\n"
             f"• **Available Budget:** **₹{amt:,.2f}**\n"
@@ -1057,9 +1285,23 @@ class LLMClient:
             f"3. **Sightseeing & Monuments:** ₹{min(daily * 0.15, 300):,.0f} – ₹{min(daily * 0.25, 500):,.0f}/day for museum and heritage entrance passes."
         )
 
-    def _handle_itinerary_efficiency_reasoning(self, active_trip: Optional[Dict[str, Any]]) -> str:
+    async def _handle_itinerary_efficiency_reasoning(
+        self,
+        active_trip: Optional[Dict[str, Any]],
+        system_prompt: str = ""
+    ) -> str:
         """Route clustering and transit optimization analysis."""
         dest = active_trip.get("destination", "your destination") if active_trip else "your destination"
+
+        prompt = (
+            f"The user wants itinerary route optimization and efficiency advice for their trip to {dest}.\n\n"
+            "Provide natural, practical advice on geographic clustering to minimize transit time between sights "
+            "and explain how to group attractions sensibly across days."
+        )
+        llm_reply = await self._generate_llm_text(prompt, system_prompt=system_prompt)
+        if llm_reply and llm_reply.strip():
+            return llm_reply.strip()
+
         return (
             f"🗺️ **Itinerary Route & Efficiency Analysis for {dest}:**\n\n"
             "To maximize time and avoid unnecessary city transit, follow **geographic clustering**:\n\n"
@@ -1067,201 +1309,6 @@ class LLMClient:
             "2. **Cluster Western Heritage / Outlying Sights**: Schedule distant fortresses or viewpoints together.\n"
             "3. **Cluster Dining & Evening Walkways**: Keep evening dining and markets near your accommodation.\n\n"
             "💡 *Tip: Tell me 'Move [Activity Name] to Day X' anytime to reschedule activities seamlessly!*"
-        )
-
-    def _generate_general_ai_response(self, text: str, active_trip: Optional[Dict[str, Any]] = None) -> str:
-        """Comprehensive general AI response generator for coding, science, math, writing, and advice."""
-        t_low = text.lower().strip()
-
-        # Math calculations: e.g. "What is 25 * 37?", "25 x 37"
-        m_calc = re.search(r"(\d+(?:\.\d+)?)\s*([\+\-\*\/x]|times|multiplied\s+by|divided\s+by|plus|minus)\s*(\d+(?:\.\d+)?)", t_low)
-        if m_calc:
-            n1 = float(m_calc.group(1))
-            op = m_calc.group(2).strip().lower()
-            n2 = float(m_calc.group(3))
-            res = None
-            if op in ["+", "plus"]: res = n1 + n2
-            elif op in ["-", "minus"]: res = n1 - n2
-            elif op in ["*", "x", "times", "multiplied by"]: res = n1 * n2
-            elif op in ["/", "divided by"] and n2 != 0: res = n1 / n2
-            if res is not None:
-                return f"**{m_calc.group(1)} × {m_calc.group(3)} = {res:g}**\n\n*(Calculation: {n1:g} {op} {n2:g} = {res:g})*"
-
-        # Python Overview
-        if "what is python" in t_low or "explain python" in t_low or t_low in ["python", "python?"]:
-            return (
-                "**Python** is a high-level, interpreted programming language celebrated for its human-readable syntax and immense ecosystem.\n\n"
-                "### Key Strengths:\n"
-                "• **Clean Readability**: Uses indentation to structure code blocks (*The Zen of Python*).\n"
-                "• **Ecosystem**: Dominates AI/Machine Learning (PyTorch, TensorFlow), Web Development (FastAPI, Django), Data Science, and DevOps.\n"
-                "• **Batteries Included**: Comprehensive standard library for networking, math, file I/O, and data processing.\n\n"
-                "```python\n"
-                "# Quick Python Example: Destination Filter\n"
-                "trips = [{\"city\": \"Kyoto\", \"days\": 5}, {\"city\": \"Paris\", \"days\": 4}]\n"
-                "long_trips = [t[\"city\"] for t in trips if t[\"days\"] >= 5]\n"
-                "print(f\"Extended stays: {long_trips}\")\n"
-                "```"
-            )
-
-        # Machine Learning
-        if "machine learning" in t_low or "what is ml" in t_low or "explain ml" in t_low:
-            return (
-                "**Machine Learning (ML)** is a subset of artificial intelligence where algorithms learn patterns directly from data to make predictions or decisions without rule-based coding.\n\n"
-                "### Three Core Paradigms:\n"
-                "1. **Supervised Learning**: Trains on labeled inputs (e.g. classification for image tagging, regression for trip cost forecasting).\n"
-                "2. **Unsupervised Learning**: Uncovers hidden structures in unlabeled data (e.g. customer clustering, recommendation systems).\n"
-                "3. **Reinforcement Learning**: An agent learns optimal actions via rewards and penalties in dynamic environments (e.g. autonomous driving, game playing)."
-            )
-
-        # Python FastAPI
-        if "fastapi" in t_low or "python api" in t_low or "write a python api" in t_low or "fastapi example" in t_low:
-            return (
-                "Here is a complete, production-ready **FastAPI REST API** with Pydantic validation:\n\n"
-                "```python\n"
-                "from fastapi import FastAPI, HTTPException, status\n"
-                "from pydantic import BaseModel, Field\n"
-                "from typing import List, Optional\n"
-                "import uvicorn\n\n"
-                "app = FastAPI(title=\"TravelTrack API Service\", version=\"1.0.0\")\n\n"
-                "class DestinationSchema(BaseModel):\n"
-                "    name: str = Field(..., min_length=2, example=\"Kyoto\")\n"
-                "    country: str = Field(..., min_length=2, example=\"Japan\")\n"
-                "    duration_days: int = Field(default=3, ge=1, le=30)\n\n"
-                "destinations_db = {}\n\n"
-                "@app.get(\"/destinations\", response_model=List[DestinationSchema])\n"
-                "def list_destinations():\n"
-                "    return list(destinations_db.values())\n\n"
-                "@app.post(\"/destinations\", status_code=status.HTTP_201_CREATED)\n"
-                "def create_destination(item: DestinationSchema):\n"
-                "    destinations_db[item.name.lower()] = item.dict()\n"
-                "    return item\n\n"
-                "if __name__ == \"__main__\":\n"
-                "    uvicorn.run(\"main:app\", host=\"127.0.0.1\", port=8000, reload=True)\n"
-                "```"
-            )
-
-        # Why is my code slow?
-        if "slow" in t_low and ("code" in t_low or "python" in t_low or "database" in t_low or "api" in t_low):
-            return (
-                "Here are the most common reasons why code or backend services run slowly, and how to fix them:\n\n"
-                "1. **N+1 Database Queries**: Querying a database inside a loop instead of performing batch fetches (`$in` or SQL joins).\n"
-                "2. **Missing Database Indexes**: Ensure fields frequently filtered (e.g. `user_id`, `trip_id`, `created_at`) have explicit indexes.\n"
-                "3. **Synchronous Blocking I/O**: Performing network calls or file reads synchronously on an `async` event loop. Use `httpx.AsyncClient` or `run_in_threadpool`.\n"
-                "4. **Inefficient Algorithm Complexity**: Replacing $O(N^2)$ nested loops with $O(1)$ Hash Maps (`set` or `dict` lookups).\n"
-                "5. **Uncached Heavy Computations**: Cache expensive idempotent operations with Redis or in-memory TTL caches."
-            )
-
-        # Recursion
-        if "recursion" in t_low:
-            if "like i'm 5" in t_low or "five" in t_low or "simply" in t_low:
-                return (
-                    "Imagine a stack of colorful Russian nesting dolls! 🪆\n\n"
-                    "1. You open the big doll, and inside is another doll! So you open that one too (**calling the same function again**).\n"
-                    "2. You keep opening dolls until you reach the tiniest doll that doesn't open. Inside is a tiny gold coin! (this is the **Base Case**).\n"
-                    "3. Now that you have the coin, you close each doll back up on your way out!\n\n"
-                    "That is recursion: repeating the same step on a smaller piece until reaching the stopping condition!"
-                )
-            return (
-                "**Recursion** is a programming technique where a function solves a problem by calling itself with reduced input parameters.\n\n"
-                "### Two Indispensable Elements:\n"
-                "1. **Base Case**: The terminal condition that stops recursive calls.\n"
-                "2. **Recursive Step**: The logic that reduces the problem towards the base case.\n\n"
-                "```python\n"
-                "def factorial(n: int) -> int:\n"
-                "    if n <= 1: return 1  # Base Case\n"
-                "    return n * factorial(n - 1)  # Recursive Step\n\n"
-                "print(factorial(5))  # Output: 120\n"
-                "```"
-            )
-
-        # Quantum Computing
-        if "quantum" in t_low:
-            return (
-                "**Quantum Computing** harnesses the unique properties of quantum mechanics to perform computations exponentially faster than classical computers for specific problem classes.\n\n"
-                "### Core Principles:\n"
-                "• **Qubits & Superposition**: Unlike classical bits (0 or 1), a qubit can exist in a linear combination of both states simultaneously.\n"
-                "• **Quantum Entanglement**: Qubits become deeply linked such that the state of one instantaneously affects another, enabling massive parallel processing.\n"
-                "• **Interference**: Quantum algorithms use constructive interference to amplify correct solution paths while canceling out incorrect ones."
-            )
-
-        # Email Drafting
-        if "email" in t_low and ("write" in t_low or "help" in t_low or "draft" in t_low):
-            return (
-                "Here is a polished, professional email template:\n\n"
-                "**Subject:** Update & Next Steps: [Project / Trip Name]\n\n"
-                "Dear [Name],\n\n"
-                "I hope this message finds you well.\n\n"
-                "I am writing to share a brief update on our progress regarding [Topic]. Everything is currently on track, and we have finalized the initial timeline and milestones.\n\n"
-                "Please let me know if you have any feedback or if you would like to adjust any of the details. I look forward to connecting soon.\n\n"
-                "Best regards,\n"
-                "[Your Name]"
-            )
-
-        # Jokes & Humor
-        if "joke" in t_low:
-            return (
-                "Here is one for you! 😄\n\n"
-                "**Why do programmers prefer dark mode?**\n"
-                "...*Because light attracts bugs!* 🐛\n\n"
-                "*(And a travel one: \"I told the airline baggage agent my suitcase wasn't heavy—it was just emotionally attached to my vacation!\")* ✈️"
-            )
-
-        # Software Engineering Roadmap
-        if "learn" in t_low and ("backend" in t_low or "software" in t_low or "engineer" in t_low):
-            return (
-                "Here is a proven roadmap for mastering **Backend Engineering**:\n\n"
-                "1. **Core Language & Foundations**: Master Python (FastAPI/Django), TypeScript (Node.js), or Go. Understand data structures and algorithmic complexity.\n"
-                "2. **Databases & Data Modeling**: Master relational SQL (PostgreSQL, indexes, transactions) and NoSQL document stores (MongoDB, Redis caching).\n"
-                "3. **API Design & Security**: RESTful principles, JWT authentication, rate limiting, and defensive input validation.\n"
-                "4. **Architecture & Microservices**: Event-driven systems (Kafka/RabbitMQ), containerization (Docker), and orchestration (Kubernetes).\n"
-                "5. **DevOps & Observability**: CI/CD pipelines, structured logging, distributed tracing, and automated testing."
-            )
-
-        # Photosynthesis (Biology / Science)
-        if "photosynthesis" in t_low:
-            return (
-                "**Photosynthesis** is the fundamental biochemical process by which green plants, algae, and cyanobacteria convert solar energy into chemical energy stored in glucose.\n\n"
-                "### The Chemical Formula:\n"
-                "$$\\text{6CO}_2 + \\text{6H}_2\\text{O} + \\text{Light} \\rightarrow \\text{C}_6\\text{H}_{12}\\text{O}_6 + \\text{6O}_2$$\n\n"
-                "### Key Components & Stages:\n"
-                "1. **Chlorophyll & Solar Absorption**: Green plants absorb sunlight through chlorophyll within chloroplasts.\n"
-                "2. **Light-Dependent Reactions**: Water molecules ($H_2O$) are split by sunlight, releasing oxygen ($O_2$) as a vital byproduct and charging ATP and NADPH.\n"
-                "3. **The Calvin Cycle (Light-Independent)**: Fixes carbon dioxide (CO2) from the atmosphere to assemble glucose, providing organic energy for plants and the global food web."
-            )
-
-        # Kyoto / Cultural Knowledge
-        if "kyoto" in t_low and any(w in t_low for w in ["famous for", "known for", "history", "culture", "about"]):
-            return (
-                "**Kyoto** is celebrated worldwide as the cultural heart and former imperial capital of Japan (serving as imperial capital from 794 to 1868).\n\n"
-                "### Why Kyoto is Renowned:\n"
-                "1. **Historic Temples & Shrines**: Over 2,000 Buddhist temples and Shinto shrines, including Kinkaku-ji (The Golden Pavilion), Kiyomizu-dera, and the thousands of red torii gates at Fushimi Inari Shrine.\n"
-                "2. **Preserved Heritage Quarters**: Gion and Pontocho with traditional wooden machiya townhouses and geisha (geiko) arts.\n"
-                "3. **Zen Gardens & Nature**: Ryoan-ji's rock garden and Arashiyama's bamboo grove.\n"
-                "4. **Traditional Gastronomy**: Kaiseki multi-course fine dining, Uji matcha, and Shojin Ryori temple cuisine."
-            )
-
-        # Japanese Travel Phrases
-        if any(w in t_low for w in ["japanese phrases", "phrases in japan", "speak in japan", "japanese words", "japanese travel", "phrases i'll need in kyoto", "phrases for kyoto", "japanese"]):
-            return (
-                "Here are the most essential, polite Japanese travel phrases for your trip to Kyoto:\n\n"
-                "### Essential Courtesy & Greetings:\n"
-                "• **Konnichiwa** (こんにちは) — *Hello / Good afternoon*\n"
-                "• **Arigatou gozaimasu** (ありがとうございます) — *Thank you very much*\n"
-                "• **Sumimasen** (すみません) — *Excuse me / I'm sorry* (essential for getting attention or apologizing in crowds)\n"
-                "• **Onegaishimasu** (お願いします) — *Please* (e.g. \"Kore o onegaishimasu\" = This one, please)\n"
-                "• **Hai / Iie** (はい / いいえ) — *Yes / No*\n\n"
-                "### Navigation & Dining:\n"
-                "• **Okaikei o onegaishimasu** (お会計をお願いします) — *The bill, please*\n"
-                "• **Oishii desu** (美味しいです) — *It's delicious!*\n"
-                "• **Eigo ga hanasemasu ka?** (英語が話せますか？) — *Can you speak English?*\n"
-                "• **Doko desu ka?** (どこですか？) — *Where is it?* (e.g. \"Eki wa doko desu ka?\" = Where is the station?)"
-            )
-
-        # Natural fallback for general inquiries
-        return (
-            f"That's a great question about **{text.strip()}**! "
-            "Whether you're exploring concepts, planning a project, or looking for practical examples, "
-            "I'm here to help break it down. What specific angle or detail would you like to explore next?"
         )
 
     async def synthesize_tool_response(
