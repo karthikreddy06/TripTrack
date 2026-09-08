@@ -48,13 +48,16 @@ def sanitize_untrusted_text(text: Optional[str]) -> str:
 
 TRAVEL_AGENT_SYSTEM_PROMPT = (
     "You are the TravelTrack AI Assistant, an advanced, highly capable general-purpose AI assistant. "
-    "You understand natural language, answer general knowledge, programming, math, science, advice, humor, and writing inquiries naturally and thoroughly. "
-    "You have access to secure TravelTrack tools for managing trips, budgets, expenses, itineraries, wishlists, and discovering verified travel destinations. "
+    "You talk naturally, warmly, directly, and engagingly like a real human—just like ChatGPT. "
+    "Never use robotic formulas, canned templates, or repetitive greeting structures. "
+    "You understand context: pronouns like 'it', 'that', 'that one', 'the second one', 'which one would you choose?' refer to recent places, trips, or topics in the conversation. "
+    "You have access to secure TravelTrack tools for managing trips, budgets, expenses, itineraries, wishlists, and discovering verified travel destinations.\n"
     "Guidelines:\n"
-    "1. For general inquiries (coding, science, explanations, jokes, general knowledge), answer directly without calling tools.\n"
-    "2. For TravelTrack queries (user's trips, expenses, budget, itinerary, wishlist, finding places, modifying itineraries), choose the appropriate tool.\n"
-    "3. Never fabricate information, prices, ratings, or coordinates. Ground travel recommendations strictly in retrieved data.\n"
-    "4. Maintain conversation context and understand follow-ups naturally."
+    "1. For general inquiries (casual chats, coding, math, science, everyday advice, humor, culture), answer conversationally and thoroughly with ZERO tool calls.\n"
+    "2. When explaining programming concepts like recursion, explain naturally with base cases and classic examples like factorial.\n"
+    "3. For TravelTrack queries (user's trips, expenses, budget, itinerary, wishlist, searching places, modifying itineraries), choose the appropriate tool.\n"
+    "4. When missing required parameters for an action (e.g. which trip to check or what date to set), ask a natural, friendly clarifying question.\n"
+    "5. Never invent fake places, trips, budgets, dates, or database IDs."
 )
 
 
@@ -300,8 +303,100 @@ class LLMClient:
         self._load_keys()
 
     def _load_keys(self):
+        self.openrouter_key = os.environ.get("OPENROUTER_API_KEY", "").strip() or os.environ.get("ANTHROPIC_AUTH_TOKEN", "").strip()
         self.gemini_key = os.environ.get("GEMINI_API_KEY", "").strip()
         self.openai_key = os.environ.get("OPENAI_API_KEY", "").strip()
+
+    async def _generate_llm_text(self, prompt: str, system_prompt: Optional[str] = None) -> Optional[str]:
+        """Generate conversational text using available LLM API (OpenRouter, Gemini, OpenAI)."""
+        self._load_keys()
+        sys_p = system_prompt or TRAVEL_AGENT_SYSTEM_PROMPT
+
+        # 1. OpenRouter
+        if self.openrouter_key:
+            try:
+                url = "https://openrouter.ai/api/v1/chat/completions"
+                headers = {
+                    "Authorization": f"Bearer {self.openrouter_key}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "https://traveltrack.app",
+                    "X-Title": "TravelTrack AI"
+                }
+                payload = {
+                    "models": [
+                        "liquid/lfm-2.5-2.6b:free",
+                        "poolside/laguna-s-2.1:free",
+                        "inclusionai/ling-3.0-flash-fin:free"
+                    ],
+                    "messages": [
+                        {"role": "system", "content": sys_p},
+                        {"role": "user", "content": prompt}
+                    ],
+                    "max_tokens": 800,
+                    "temperature": 0.7
+                }
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    resp = await client.post(url, headers=headers, json=payload)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        choices = data.get("choices", [])
+                        if choices:
+                            msg = choices[0].get("message", {})
+                            content = msg.get("content")
+                            if content and content.strip():
+                                return content.strip()
+                            reasoning = msg.get("reasoning")
+                            if reasoning and reasoning.strip() and len(reasoning.strip()) > 20:
+                                return reasoning.strip()
+            except Exception as exc:
+                logger.warning(f"OpenRouter text generation failed: {exc}")
+
+        # 2. Gemini
+        if self.gemini_key:
+            try:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={self.gemini_key}"
+                payload = {
+                    "systemInstruction": {"parts": [{"text": sys_p}]},
+                    "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                    "generationConfig": {"temperature": 0.7, "maxOutputTokens": 1024}
+                }
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    resp = await client.post(url, json=payload)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        candidates = data.get("candidates", [])
+                        if candidates:
+                            parts = candidates[0].get("content", {}).get("parts", [{}])
+                            for part in parts:
+                                if "text" in part and part["text"].strip():
+                                    return part["text"].strip()
+            except Exception as exc:
+                logger.warning(f"Gemini text generation failed: {exc}")
+
+        # 3. OpenAI
+        if self.openai_key:
+            try:
+                url = "https://api.openai.com/v1/chat/completions"
+                payload = {
+                    "model": "gpt-4o-mini",
+                    "messages": [
+                        {"role": "system", "content": sys_p},
+                        {"role": "user", "content": prompt}
+                    ],
+                    "temperature": 0.7,
+                    "max_tokens": 1024
+                }
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    resp = await client.post(url, headers={"Authorization": f"Bearer {self.openai_key}"}, json=payload)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        choices = data.get("choices", [])
+                        if choices:
+                            return choices[0].get("message", {}).get("content", "").strip()
+            except Exception as exc:
+                logger.warning(f"OpenAI text generation failed: {exc}")
+
+        return None
 
     async def run_agent_turn(
         self,
@@ -310,32 +405,86 @@ class LLMClient:
         user_context: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        Executes an agent turn using Gemini or OpenAI native tool-calling,
-        or dynamic LLM reasoning when API keys are absent.
+        Executes an agent turn using OpenRouter, Gemini, or OpenAI native tool-calling,
+        or dynamic LLM reasoning when API keys are absent or slow.
         """
         self._load_keys()
 
         active_trip = user_context.get("active_trip")
         all_trips = user_context.get("all_trips", [])
         recent_places = user_context.get("last_recommended_places", [])
+        last_place = user_context.get("last_mentioned_place")
 
         trips_str = ", ".join([f"'{t.get('destination', t.get('title'))}' (ID: {t.get('_id')})" for t in all_trips]) or "None"
         active_str = f"'{active_trip.get('destination')}' (ID: {active_trip.get('_id')})" if active_trip else "None selected"
         places_str = ", ".join([f"{idx+1}. {p.get('name')} ({p.get('category')})" for idx, p in enumerate(recent_places[:6])]) or "None"
+        last_place_str = last_place.get('name') if last_place else "None"
 
         augmented_system_prompt = (
             f"{TRAVEL_AGENT_SYSTEM_PROMPT}\n\n"
             f"User Context:\n"
             f"- User Trips: {trips_str}\n"
             f"- Active Selected Trip: {active_str}\n"
-            f"- Recently Recommended Places in Conversation: {places_str}\n\n"
+            f"- Recently Recommended Places in Conversation: {places_str}\n"
+            f"- Last Mentioned / Selected Place: {last_place_str}\n\n"
             "Guidelines:\n"
             "1. Answer general questions (coding, science, math, jokes, advice, writing, trivia) conversationally without tools.\n"
             "2. If the user asks about their trips, budget, itinerary, or wishlist, or asks to search places or modify travel plans, use the appropriate TravelTrack tool.\n"
             "3. If an action has missing parameters that cannot be resolved from context, ask a clarifying question."
         )
 
-        # 1. Try Google Gemini with Function Calling
+        # 1. Try OpenRouter with Function Calling & Fallback Models
+        if self.openrouter_key:
+            try:
+                url = "https://openrouter.ai/api/v1/chat/completions"
+                headers = {
+                    "Authorization": f"Bearer {self.openrouter_key}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "https://traveltrack.app",
+                    "X-Title": "TravelTrack AI"
+                }
+                messages = [{"role": "system", "content": augmented_system_prompt}]
+                for h in chat_history[-6:]:
+                    role = "assistant" if h.get("role") in ["assistant", "model"] else "user"
+                    messages.append({"role": role, "content": h.get("content", "")})
+                messages.append({"role": "user", "content": user_message})
+
+                payload = {
+                    "models": [
+                        "liquid/lfm-2.5-2.6b:free",
+                        "poolside/laguna-s-2.1:free",
+                        "inclusionai/ling-3.0-flash-fin:free"
+                    ],
+                    "messages": messages,
+                    "tools": TRAVELTRACK_OPENAI_TOOLS,
+                    "max_tokens": 800,
+                    "temperature": 0.7
+                }
+                async with httpx.AsyncClient(timeout=12.0) as client:
+                    resp = await client.post(url, headers=headers, json=payload)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        choices = data.get("choices", [])
+                        if choices:
+                            msg = choices[0].get("message", {})
+                            if msg.get("tool_calls"):
+                                t_call = msg["tool_calls"][0]["function"]
+                                args_str = t_call.get("arguments", "{}")
+                                try:
+                                    args = json.loads(args_str) if isinstance(args_str, str) else args_str
+                                except Exception:
+                                    args = {}
+                                return {"action": "call_tool", "tool": t_call.get("name"), "args": args}
+                            content = msg.get("content")
+                            if content and content.strip():
+                                return {"action": "reply", "content": content.strip()}
+                            reasoning = msg.get("reasoning")
+                            if reasoning and reasoning.strip() and len(reasoning.strip()) > 20:
+                                return {"action": "reply", "content": reasoning.strip()}
+            except Exception as exc:
+                logger.warning(f"OpenRouter agent call failed: {exc}")
+
+        # 2. Try Google Gemini with Function Calling
         if self.gemini_key:
             try:
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={self.gemini_key}"
@@ -367,7 +516,7 @@ class LLMClient:
             except Exception as exc:
                 logger.warning(f"Gemini agent call failed: {exc}")
 
-        # 2. Try OpenAI with Function Calling
+        # 3. Try OpenAI with Function Calling
         if self.openai_key:
             try:
                 url = "https://api.openai.com/v1/chat/completions"
@@ -400,7 +549,7 @@ class LLMClient:
             except Exception as exc:
                 logger.warning(f"OpenAI agent call failed: {exc}")
 
-        # 3. Dynamic Reasoning Engine (intelligent conversational reasoner)
+        # 4. Dynamic Reasoning Engine (intelligent conversational reasoner)
         return self._dynamic_reasoning_turn(user_message, chat_history, user_context)
 
     def _dynamic_reasoning_turn(
@@ -667,20 +816,48 @@ class LLMClient:
             return {"action": "reply", "content": "Which destination or city would you like to find places for? (e.g. 'Mumbai', 'Paris', 'Kyoto')"}
 
         # -----------------------------------------------------------------
-        # O. GREETING & CASUAL CONVERSATION
+        # O. PLANNING, INSPIRATION & WEEKEND RECOMMENDATIONS
         # -----------------------------------------------------------------
-        if msg_low in ["hi", "hey", "heyy", "hello", "good morning", "good afternoon", "good evening", "what's up", "yo"]:
-            hour = datetime.now().hour
-            tod = "Good morning" if 5 <= hour < 12 else ("Good afternoon" if 12 <= hour < 18 else "Good evening")
+        if any(p in msg_low for p in ["plan something for me", "plan a trip for me", "help me plan", "plan something"]):
             if active_trip:
-                return {"action": "reply", "content": f"{tod}! 👋 How can I help with your journey to **{active_trip.get('destination')}** or answer any other questions today?"}
-            return {"action": "reply", "content": f"{tod}! 👋 How can I help you today? Feel free to ask general questions, write code, explore places, or manage your trips."}
+                dest = active_trip.get("destination", "your destination")
+                return {"action": "reply", "content": f"I'd love to help you plan! 🗺️ For your trip to **{dest}**, what kind of experiences are you most excited about—historic landmarks, scenic viewpoints, authentic local food, or something relaxing? Tell me what you love and I'll schedule some great activities into your itinerary!"}
+            return {"action": "reply", "content": "I'd love to help you plan an unforgettable trip! 🗺️ Where are you thinking of going, or what kind of vibe are you in the mood for—like a vibrant cultural city, a relaxing coastal escape, or a peaceful mountain retreat? Tell me what you enjoy and we'll start putting together an incredible plan!"}
+
+        if any(p in msg_low for p in ["travel somewhere peaceful", "somewhere peaceful", "peaceful place", "peaceful destination", "quiet place", "peaceful spots"]):
+            return {"action": "reply", "content": "A peaceful getaway sounds wonderful! 🌿 Here are a few serene destinations to consider:\n\n• **Kyoto, Japan**: Renowned for Zen rock gardens, ancient bamboo groves, and tranquil temples like Ryoan-ji and Ginkaku-ji.\n• **Dharamshala & McLeod Ganj, India**: Nestled in the Himalayas, famous for peaceful mountain trails, meditation centers, and serene monasteries.\n• **Hallstatt & Lake Como, Europe**: Stunning alpine and lakeside villages surrounded by dramatic peaks and mirror-still waters.\n\nWhat kind of setting sounds most relaxing to you—tranquil nature, mountain serenity, or cultural quiet?"}
+
+        if any(p in msg_low for p in ["what should i do this weekend", "weekend plans", "do this weekend", "plans for the weekend"]):
+            dest_hint = f" around {active_trip.get('destination')}" if active_trip else ""
+            return {"action": "reply", "content": f"Here are some great ideas for this weekend{dest_hint}! ☀️\n\n1. **Outdoors & Nature**: Explore a scenic walking trail, visit a local botanical garden, or have a relaxing picnic by a lake.\n2. **Culture & Heritage**: Check out a museum, an art exhibition, or historic landmark in your city that you haven't visited yet.\n3. **Dining & Cafes**: Spend an afternoon at a cozy local cafe with a good book or discover an authentic neighborhood market.\n\nWhich city are you currently in? Tell me where you are and I can find some fantastic specific sights for you!"}
+
+        if any(p in msg_low for p in ["which one would you choose", "which would you choose", "which one do you recommend", "your pick"]):
+            if recent_places:
+                top_p = recent_places[0]
+                name = top_p.get("name", "the first option")
+                desc = top_p.get("description") or "It offers an incredible blend of atmosphere, history, and charm."
+                second_p = recent_places[1] if len(recent_places) >= 2 else None
+                second_str = f" On the other hand, **{second_p.get('name')}** is also a fantastic choice if you want something more relaxed." if second_p else ""
+                return {"action": "reply", "content": f"If I had to choose, I'd personally go with **{name}**! {desc}{second_str}\n\nWould you like me to add **{name}** to your itinerary or save it to your wishlist?"}
+
+        # -----------------------------------------------------------------
+        # P. GREETING & CASUAL CONVERSATION
+        # -----------------------------------------------------------------
+        is_greeting = (
+            msg_low in ["hi", "hey", "heyy", "hello", "good morning", "good afternoon", "good evening", "what's up", "whats up", "yo", "sup", "howdy", "hey bro"]
+            or any(msg_low.startswith(p) for p in ["hey ", "heyy ", "hello ", "hi ", "yo "])
+            or any(p in msg_low for p in ["what's up", "whats up", "how's it going", "how are you doing", "how are you"])
+        )
+        if is_greeting and not any(w in msg_low for w in ["search", "find", "budget", "itinerary", "expense", "trip", "places"]):
+            if active_trip:
+                return {"action": "reply", "content": f"Hey! 👋 Great to hear from you. How can I help with your journey to **{active_trip.get('destination')}** or anything else on your mind today?"}
+            return {"action": "reply", "content": "Hey! 👋 What's up? How can I help you today? Whether you want to explore new destinations, plan a trip, or just chat, I'm here!"}
 
         if msg_low in ["thanks", "thank you", "cool", "okay", "ok", "great", "awesome", "perfect"]:
             return {"action": "reply", "content": "You're very welcome! Let me know if you have any more questions or if there's anything else I can help you with."}
 
         # -----------------------------------------------------------------
-        # P. GENERAL AI INQUIRY (Science, Coding, Math, Writing, Jokes, Advice, etc.)
+        # Q. GENERAL AI INQUIRY (Science, Coding, Math, Writing, Jokes, Advice, etc.)
         # -----------------------------------------------------------------
         return {"action": "reply", "content": self._generate_general_ai_response(user_message, active_trip)}
 
@@ -1080,13 +1257,11 @@ class LLMClient:
                 "• **Doko desu ka?** (どこですか？) — *Where is it?* (e.g. \"Eki wa doko desu ka?\" = Where is the station?)"
             )
 
-        # Dynamic fallback for any general query
+        # Natural fallback for general inquiries
         return (
-            f"Here is a clear overview regarding **{text.strip()}**:\n\n"
-            "This topic involves understanding key foundational concepts and practical applications. "
-            "Whether you are analyzing a principle, drafting code, or planning a project, "
-            "breaking it down into core components and clear steps leads to the most effective solution.\n\n"
-            "Would you like to dive deeper into any specific aspect or explore related examples?"
+            f"That's a great question about **{text.strip()}**! "
+            "Whether you're exploring concepts, planning a project, or looking for practical examples, "
+            "I'm here to help break it down. What specific angle or detail would you like to explore next?"
         )
 
     async def synthesize_tool_response(
@@ -1097,10 +1272,75 @@ class LLMClient:
         tool_result: Dict[str, Any],
         places: Optional[List[Dict[str, Any]]] = None
     ) -> str:
-        """Synthesize natural response incorporating actual tool execution results."""
+        """Synthesize natural response incorporating actual tool execution results via live LLM."""
         self._load_keys()
 
-        # Search Places / Nearby Places: Format as useful, rich travel recommendations
+        # Build raw summary of the tool result for LLM
+        summary_lines = []
+        if tool_name in ["search_places", "find_nearby_places"]:
+            q = tool_result.get("query") or tool_result.get("landmark", "the area")
+            if places:
+                summary_lines.append(f"Destination/Area: {q}")
+                summary_lines.append(f"Found {len(places)} verified places:")
+                for idx, p in enumerate(places[:4], 1):
+                    p_name = p.get("name", "Landmark")
+                    p_cat = (p.get("category") or "Attraction").title()
+                    p_loc = p.get("address") or q
+                    p_desc = p.get("description") or f"A notable {p_cat.lower()} in {q}."
+                    summary_lines.append(f"{idx}. {p_name} ({p_cat}) - Location: {p_loc}. Highlights: {p_desc}")
+            else:
+                summary_lines.append(f"No places found for '{q}'.")
+        elif tool_name == "get_budget":
+            summary_lines.append(f"Trip: {tool_result.get('destination', 'Trip')}")
+            summary_lines.append(f"Total Budget: ₹{tool_result.get('budget', 0):,.2f}")
+            summary_lines.append(f"Total Spent: ₹{tool_result.get('total_spent', 0):,.2f}")
+            summary_lines.append(f"Remaining Budget: ₹{tool_result.get('remaining_budget', 0):,.2f}")
+            summary_lines.append(f"Logged Expenses Count: {tool_result.get('expense_count', 0)}")
+        elif tool_name == "get_itinerary":
+            summary_lines.append(f"Trip: {tool_result.get('destination', 'Trip')}")
+            acts = tool_result.get("activities", [])
+            summary_lines.append(f"Activities count: {len(acts)}")
+            for a in acts[:6]:
+                summary_lines.append(f"- Day {a.get('day_number')}: {a.get('title')} ({a.get('time', 'Anytime')}) at {a.get('location', '')}")
+        elif tool_name == "add_itinerary_activity":
+            act = tool_result.get("activity", {})
+            summary_lines.append(f"Successfully added '{act.get('title')}' to Day {act.get('day_number', 1)} of itinerary.")
+        elif tool_name == "add_wishlist":
+            item = tool_result.get("item", {})
+            summary_lines.append(f"Successfully saved '{item.get('name')}' to user's wishlist.")
+        elif tool_name == "get_wishlist":
+            items = tool_result.get("items", [])
+            summary_lines.append(f"Saved wishlist items ({len(items)}):")
+            for i in items[:6]:
+                summary_lines.append(f"- {i.get('name')} ({i.get('location', 'Global')})")
+        elif tool_name == "update_trip":
+            trip = tool_result.get("trip", {})
+            summary_lines.append(f"Successfully updated trip '{trip.get('destination')}' to start on {trip.get('start_date')}.")
+        elif tool_name == "get_user_trips":
+            trips = tool_result.get("trips", [])
+            summary_lines.append(f"User trips ({len(trips)}):")
+            for t in trips:
+                summary_lines.append(f"- {t.get('title', t.get('destination'))} to {t.get('destination')} ({t.get('start_date')} to {t.get('end_date')}), budget: ₹{t.get('budget', 0):,.2f}")
+        else:
+            summary_lines.append(json.dumps(tool_result))
+
+        raw_summary = "\n".join(summary_lines)
+
+        # 1. Real LLM Synthesis (ChatGPT feel)
+        if self.openrouter_key or self.gemini_key or self.openai_key:
+            synth_prompt = (
+                f"The user said: \"{user_message}\"\n\n"
+                f"The TravelTrack tool '{tool_name}' returned these verified data points:\n{raw_summary}\n\n"
+                "Write a natural, conversational, ChatGPT-style response presenting this information clearly and engagingly.\n"
+                "If places were returned, introduce them warmly with their highlights and invite the user to add any to their trip or wishlist.\n"
+                "If a budget or itinerary was returned, provide clear, helpful takeaways.\n"
+                "Never use rigid canned response templates. Talk like a friendly, knowledgeable human travel companion."
+            )
+            llm_reply = await self._generate_llm_text(synth_prompt)
+            if llm_reply and llm_reply.strip():
+                return llm_reply.strip()
+
+        # 2. Dynamic Clean Fallback (when LLM is offline or times out)
         if tool_name in ["search_places", "find_nearby_places"]:
             count = len(places or [])
             q = tool_result.get("query") or tool_result.get("landmark", "the area")
