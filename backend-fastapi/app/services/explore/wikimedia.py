@@ -161,9 +161,10 @@ class WikimediaService:
             r"highway|motorway|expressway|treaty|history of|demographics of|economy of|geography of|"
             r"olympics|championship|games\b|cup\b|attack|strikes?|commune|empire|festival|"
             r"constituency|lok sabha|vidhan sabha|assembly constituency|district\b|division\b|"
-            r"engineering college|medical college|university\b|high school|college of|institute of|"
-            r"consulate|embassy|high commission|fire department|fire station|police department|police station|stock exchange|"
-            r"municipal corporation|ministry of|department of|council\b)\b",
+            r"engineering college|medical college|university\b|school\b|high school|college\b|collegiate|institute of|academy of|"
+            r"hospital\b|dispensary|clinic\b|health centre|nursing home|"
+            r"bank\b|financial|stock exchange|consulate|embassy|high commission|fire department|fire station|police department|police station|"
+            r"municipal corporation|ministry of|department of|council\b|swimming pool|studios?\b)\b",
             re.IGNORECASE
         )
 

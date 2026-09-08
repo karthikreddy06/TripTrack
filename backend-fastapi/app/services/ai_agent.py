@@ -482,21 +482,31 @@ class LLMClient:
         # -----------------------------------------------------------------
         # G. WISHLIST OPERATIONS
         # -----------------------------------------------------------------
-        if any(p in msg_low for p in ["show my wishlist", "check my wishlist", "my wishlist", "what is on my wishlist", "show wishlist"]):
-            return {"action": "call_tool", "tool": "get_wishlist", "args": {}}
-
         if "wishlist" in msg_low or "wishkist" in msg_low:
             if "add" in msg_low or "save" in msg_low:
-                m_clean = re.sub(r"\b(?:add|save|to|my|the|into|wishlist|wishkist|please)\b", "", msg_text, flags=re.IGNORECASE).strip()
-                m_clean = re.sub(r"[^\w\s]", "", m_clean).strip()
-                if not m_clean or m_clean.lower() in ["it", "this", "that"]:
-                    if recent_places:
+                m_clean = None
+                if "first" in msg_low or "1st" in msg_low or "number 1" in msg_low or "first one" in msg_low:
+                    m_clean = recent_places[0].get("name") if recent_places else None
+                elif "second" in msg_low or "2nd" in msg_low or "number 2" in msg_low or "second one" in msg_low:
+                    m_clean = recent_places[1].get("name") if len(recent_places) >= 2 else None
+                elif "third" in msg_low or "3rd" in msg_low or "number 3" in msg_low or "third one" in msg_low:
+                    m_clean = recent_places[2].get("name") if len(recent_places) >= 3 else None
+                elif any(w in msg_low for w in ["it", "this", "that", "that one", "the one"]):
+                    m_clean = user_context.get("last_mentioned_place", {}).get("name") or (recent_places[0].get("name") if recent_places else None)
+                else:
+                    cand = re.sub(r"\b(?:add|save|to|my|the|into|wishlist|wishkist|please)\b", "", msg_text, flags=re.IGNORECASE).strip()
+                    cand = re.sub(r"[^\w\s]", "", cand).strip()
+                    if cand and len(cand) >= 2:
+                        m_clean = cand
+                    elif recent_places:
                         m_clean = recent_places[0].get("name")
-                    elif user_context.get("last_mentioned_place"):
-                        m_clean = user_context["last_mentioned_place"].get("name")
+
                 if m_clean and len(m_clean) >= 2:
                     return {"action": "call_tool", "tool": "add_wishlist", "args": {"place_name": m_clean}}
                 return {"action": "reply", "content": "Sure — which place would you like me to add to your wishlist?"}
+
+            if any(p in msg_low for p in ["show", "check", "view", "what is on", "get", "list"]) or msg_low.strip() in ["wishlist", "my wishlist"]:
+                return {"action": "call_tool", "tool": "get_wishlist", "args": {}}
 
         # -----------------------------------------------------------------
         # H. ADD TO ITINERARY (WITH CONTEXT RESOLUTION)
